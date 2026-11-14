@@ -1,10 +1,12 @@
-# Member A — Phases 1–3 backend
+# Member A — Backend (Phases 1–4)
 
-FastAPI foundation for HORIZON OPS. Requires **Python 3.14**. The only application
-endpoint is `GET /api/health`. Phase 2 adds a standalone Horizons client and
-offline cache. Phase 3 adds terrain horizons, visibility, metrics and LunaDiff
-as pure functions and local commands. Science HTTP endpoints are Phase 4 work.
-No NASA service or dataset is needed to start the health API.
+FastAPI backend for HORIZON OPS. Requires **Python 3.14**. Phase 1 establishes
+the health API and browser CORS boundary; Phase 2 adds the NASA/JPL Horizons
+ephemeris client and offline cache; Phase 3 adds terrain horizons, visibility,
+metrics and LunaDiff; Phase 4 exposes verified site catalog, analysis,
+LunaDiff, recommendation readiness, and reproducible JSON/CSV export endpoints.
+No external network call or multi-GB GeoTIFF is needed to run tests or analyze
+the tracked Connecting Ridge fixture offline.
 
 ## Install, run and test
 
@@ -84,8 +86,8 @@ require CORS permission.
   `backend/engine/` is reserved for A's later science modules.
 
 Health tests cover response compatibility, live UTC timestamps, allowed/rejected
-CORS origins, and environment configuration. Scientific endpoints and their
-shared request/response schemas are deliberately left for the agreed contracts.
+CORS origins, and environment configuration. Scientific endpoints implemented
+in Phase 4 below conform to `contracts/*.schema.json`.
 
 ## Phase 2: real Sun/Earth positions and offline cache
 
@@ -168,8 +170,7 @@ atomic writes and compatibility with D's draft sample/provenance definitions.
 The new modules calculate a source-backed terrain skyline, apply it to Sun/Earth
 positions, integrate sunlight/occlusion durations, and compare equal-duration
 missions on elapsed time. They return the existing D analysis/diff shapes.
-The health API remains the only HTTP endpoint; these commands do not wire the
-frontend to live science results yet.
+Phase 4 wires these engine functions into FastAPI HTTP endpoints below.
 
 An included small real example can be analyzed **offline in a fresh clone**:
 
@@ -228,3 +229,75 @@ Library entry points:
 See [SCIENCE.md](SCIENCE.md) for exact definitions, synthetic/real provenance,
 sampling limitations, source reproduction and measured sensitivity. The raster
 adapter is A-owned and leaves B's terrain functions and shared contracts intact.
+
+## Phase 4: HTTP science & export API
+
+All Phase 4 endpoints run offline out-of-the-box against the tracked real Site 01
+fixtures in `backend/tests/fixtures/science/site01/` (`site.json`,
+`horizon.json`, `analysis_nominal.json`, `analysis_delay48h.json`,
+`diff_delay48h.json`, and `ephemeris/`). Live upstream JPL Horizons fetches remain
+disabled unless both `HORIZON_OPS_ALLOW_LIVE_HORIZONS=true` and `online: true`
+are explicitly set; missing offline caches fail closed with HTTP `404`.
+
+### Endpoints
+
+- `GET /api/sites` (`?site_id=...`) — list contract-verified south-polar sites
+  (`contracts/site.schema.json`). Unverified legacy IDs are not exposed.
+- `GET /api/sites/{site_id}` — return one verified site or HTTP `404`.
+- `POST /api/analyze` — compute solar/Earth visibility, illumination, slope
+  screening, and mission metrics (`contracts/analysis.schema.json`). Accepts
+  `site_id` or explicit south-polar `observer`, `start_utc`, `duration_hours`,
+  `sample_minutes`, `observer_height_m`, and optional `slope_deg` /
+  `horizon_profile`.
+- `POST /api/diff` — compute LunaDiff (`contracts/diff.schema.json`) from any
+  combination of cached/precomputed `analysis_id`, inline scenario request, or
+  full analysis object (`scenario_a` / `scenario_b` or `scenario_a_id` /
+  `scenario_b_id`).
+- `POST /api/recommend` — return verified DEM proximity landing candidates
+  (`contracts/recommend.schema.json`) if configured in
+  `HORIZON_OPS_RECOMMENDATIONS_PATHS`, or HTTP `501` when unpopulated (never
+  fabricates synthetic candidates).
+- `GET /api/export` & `POST /api/export` — download reproducible JSON
+  (`application/json`) or metadata-headered CSV (`text/csv`) by `analysis_id` or
+  inline scenario parameters (`format=json|csv`), setting `Content-Disposition`.
+
+### Local `curl` examples
+
+```bash
+# List contract-verified sites
+curl http://127.0.0.1:8000/api/sites
+
+# Run nominal 14-day Connecting Ridge analysis offline
+curl -X POST http://127.0.0.1:8000/api/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "site_id": "nasa-site01-observation",
+    "start_utc": "2026-11-15T00:00:00Z",
+    "duration_hours": 336,
+    "sample_minutes": 30,
+    "observer_height_m": 2.0
+  }'
+
+# Compare nominal vs +48h delayed scenarios via precomputed analysis IDs
+curl -X POST http://127.0.0.1:8000/api/diff \
+  -H "Content-Type: application/json" \
+  -d '{
+    "scenario_a": "analysis-83526dc582d49e81c7f4982d",
+    "scenario_b": "analysis-bdfc2955855d1a12daf3cbec"
+  }'
+
+# Download reproducible CSV telemetry for the nominal analysis
+curl -OJ "http://127.0.0.1:8000/api/export?analysis_id=analysis-83526dc582d49e81c7f4982d&format=csv"
+```
+
+### Phase 4 handoff for C and D
+
+- **C (Frontend UX):** `GET /api/sites`, `POST /api/analyze`, `POST /api/diff`,
+  and `GET|POST /api/export` run offline for `nasa-site01-observation` on
+  `2026-11-15T00:00:00Z` and `2026-11-17T00:00:00Z` (336h, 30m step, 2m mast).
+  `/api/recommend` intentionally returns HTTP `501` until verified DEM
+  candidate generation is populated.
+- **D (3D & Contracts):** `backend/tests/fixtures/science/site01/site.json` is
+  the authoritative observer definition (`nasa-site01-observation`), and
+  `analysis_nominal.json` / `analysis_delay48h.json` / `diff_delay48h.json`
+  are committed in the same folder with hashes in `manifest.json`.

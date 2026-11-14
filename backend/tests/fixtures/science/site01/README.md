@@ -17,8 +17,11 @@ sample coverage does not prove the absence of subgrid or more distant blockers.
 The full source request, acquisition time, raw response and integrity hash are
 retained. The observations can be replayed without any network calls.
 
-`requests.json` specifies those two exact requests. `manifest.json` records hashes
-for the JSON inputs. Hashes detect changes; they are not publisher signatures.
+`requests.json` specifies those two exact requests. `analysis_nominal.json`,
+`analysis_delay48h.json`, and `diff_delay48h.json` record the derived offline
+analysis and LunaDiff outputs generated from those inputs via
+`backend.engine.mission`. `manifest.json` records hashes for the JSON inputs and
+derived outputs. Hashes detect changes; they are not publisher signatures.
 These tests exercise the real-data integration and contract shape. Controlled
 analytic tests separately cover geometry, disc fractions and time integration;
 this recording is not an independent flight-validation oracle.

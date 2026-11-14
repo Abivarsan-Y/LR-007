@@ -1,3 +1,4 @@
+import { PolarMap } from './PolarMap'
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { ArrowLeft, Box, Map, Minus, Plus, Search } from 'lucide-react'
 import { drawMoon, parseLocation } from './lunarRendering'
@@ -218,7 +219,7 @@ export function LunarViewport({ onSiteChange, siteId, siteName, source, onSource
           : <><strong>Synthetic terrain and celestial directions</strong><p>This test scene is independent of the selected landing site/date. Use the fixture timeline below to change Sun/Earth directions.</p><p>Sun az/el: {sun.azimuth_deg.toFixed(1)}° / {sun.elevation_deg.toFixed(1)}° · Earth az/el: {earth.azimuth_deg.toFixed(1)}° / {earth.elevation_deg.toFixed(1)}°.</p></>}
         <p>Drag to rotate · scroll/pinch to zoom. Height exaggeration and lighting are illustrative; the lander is enlarged.</p>
       </div>
-    </> : <div className="viewport-caption map-pending"><span className="badge">2D MAP PENDING</span><h2>Your next landing, in context.</h2><p>The interactive polar map is not connected yet.</p><button onClick={() => setMode('3d')}>Return to 3D scene</button></div>}
+    </> : <PolarMap key={siteId} siteId={siteId} onSiteChange={onSiteChange} />}
     {coordinates && <p className="scene-disclosure" aria-live="polite">Latitude {coordinates.lat.toFixed(4)}° · Longitude {coordinates.lon.toFixed(4)}° (east positive)</p>}
     <div className="viewport-footer"><span>{mode === 'globe' ? 'Moon overview' : source === 'synthetic' ? 'Synthetic test point' : siteName}</span><span>{mode === 'globe' ? 'ILLUSTRATED' : source === 'synthetic' ? 'TEST DIRECTIONS' : 'GRID INSPECTION'}</span></div>
   </section>

@@ -1,0 +1,137 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "elapsed-lunadiff-v1",
+    "sources": [
+      {
+        "id": "jpl-horizons-sun:sha256:d058e72c988715d6",
+        "uri": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2710%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&CENTER=%27coord%40301%27&COORD_TYPE=%27CYLINDRICAL%27&SITE_COORD=%27-137.501984907623%2C16.296857558400%2C-1739.270418485755%27&START_TIME=%272026-11-15+00%3A00%3A00%27&STOP_TIME=%272026-11-29+00%3A00%3A00%27&STEP_SIZE=%2730+min%27&QUANTITIES=%274%2C13%2C20%27&CSV_FORMAT=%27YES%27&TIME_TYPE=%27UT%27&TIME_DIGITS=%27SECONDS%27&CAL_FORMAT=%27CAL%27&CAL_TYPE=%27GREGORIAN%27&RANGE_UNITS=%27KM%27&SUPPRESS_RANGE_RATE=%27YES%27&APPARENT=%27AIRLESS%27&ANG_FORMAT=%27DEG%27&EXTRA_PREC=%27YES%27&ELEV_CUT=%27-90%27&SKIP_DAYLT=%27NO%27",
+        "sha256": "d058e72c988715d61db855401a57bc477cac34b9e2af566a26ccc9c01c7173df"
+      },
+      {
+        "id": "jpl-horizons-earth:sha256:f3c48ee0c097c172",
+        "uri": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&CENTER=%27coord%40301%27&COORD_TYPE=%27CYLINDRICAL%27&SITE_COORD=%27-137.501984907623%2C16.296857558400%2C-1739.270418485755%27&START_TIME=%272026-11-15+00%3A00%3A00%27&STOP_TIME=%272026-11-29+00%3A00%3A00%27&STEP_SIZE=%2730+min%27&QUANTITIES=%274%2C13%2C20%27&CSV_FORMAT=%27YES%27&TIME_TYPE=%27UT%27&TIME_DIGITS=%27SECONDS%27&CAL_FORMAT=%27CAL%27&CAL_TYPE=%27GREGORIAN%27&RANGE_UNITS=%27KM%27&SUPPRESS_RANGE_RATE=%27YES%27&APPARENT=%27AIRLESS%27&ANG_FORMAT=%27DEG%27&EXTRA_PREC=%27YES%27&ELEV_CUT=%27-90%27&SKIP_DAYLT=%27NO%27",
+        "sha256": "f3c48ee0c097c17222e8bedffb18f57f214a13913795d5b2efb50905d097a6fd"
+      },
+      {
+        "id": "dem-Site01_final_adj_5mpp_surf:sha256:3ba7b97cb00a2bcf",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif",
+        "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e"
+      },
+      {
+        "id": "nasa-lola-site01-ldec:sha256:16d6ed21020ad48f",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_ldec.tif",
+        "sha256": "16d6ed21020ad48fa71d94e7437492acf5bf04118f52bcd292f57f22ead4cd23"
+      },
+      {
+        "id": "nasa-lola-site01-slp:sha256:3a90035a4946b4a0",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_slp.tif",
+        "sha256": "3a90035a4946b4a04b7332c52f0b2b1cff71648bd8c105e14d8a7e15c6bcfe8e"
+      },
+      {
+        "id": "nasa-lola-site01-toterr:sha256:cf2cf52f52d2aa51",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_toterr.tif",
+        "sha256": "cf2cf52f52d2aa51e60d058010d10b0ebfb1d3e920f5a2b9a46eb6c51054ab1c"
+      },
+      {
+        "id": "nasa-lola-site01-slperr:sha256:52bc3b239f61605e",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_slperr.tif",
+        "sha256": "52bc3b239f61605e6bb98bab6d6b17acd22389c59e57336862157f2fbd643a33"
+      },
+      {
+        "id": "dem-LDEM_80S_20MPP_ADJ:sha256:09b7ca80f9e6a146",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_20mpp/LDEM_80S_20MPP_ADJ.TIF",
+        "sha256": "09b7ca80f9e6a146f970225d18af72fc02787669b3ef51b888e347d2b6845649"
+      },
+      {
+        "id": "jpl-horizons-sun:sha256:6e6c8e340d3924fd",
+        "uri": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%2710%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&CENTER=%27coord%40301%27&COORD_TYPE=%27CYLINDRICAL%27&SITE_COORD=%27-137.501984907623%2C16.296857558400%2C-1739.270418485755%27&START_TIME=%272026-11-17+00%3A00%3A00%27&STOP_TIME=%272026-12-01+00%3A00%3A00%27&STEP_SIZE=%2730+min%27&QUANTITIES=%274%2C13%2C20%27&CSV_FORMAT=%27YES%27&TIME_TYPE=%27UT%27&TIME_DIGITS=%27SECONDS%27&CAL_FORMAT=%27CAL%27&CAL_TYPE=%27GREGORIAN%27&RANGE_UNITS=%27KM%27&SUPPRESS_RANGE_RATE=%27YES%27&APPARENT=%27AIRLESS%27&ANG_FORMAT=%27DEG%27&EXTRA_PREC=%27YES%27&ELEV_CUT=%27-90%27&SKIP_DAYLT=%27NO%27",
+        "sha256": "6e6c8e340d3924fdbbe428e1fdf2c778a893ea2bc9d07b55976bed2080fd2266"
+      },
+      {
+        "id": "jpl-horizons-earth:sha256:40e0c60cd2e58ace",
+        "uri": "https://ssd.jpl.nasa.gov/api/horizons.api?format=json&COMMAND=%27399%27&MAKE_EPHEM=%27YES%27&EPHEM_TYPE=%27OBSERVER%27&CENTER=%27coord%40301%27&COORD_TYPE=%27CYLINDRICAL%27&SITE_COORD=%27-137.501984907623%2C16.296857558400%2C-1739.270418485755%27&START_TIME=%272026-11-17+00%3A00%3A00%27&STOP_TIME=%272026-12-01+00%3A00%3A00%27&STEP_SIZE=%2730+min%27&QUANTITIES=%274%2C13%2C20%27&CSV_FORMAT=%27YES%27&TIME_TYPE=%27UT%27&TIME_DIGITS=%27SECONDS%27&CAL_FORMAT=%27CAL%27&CAL_TYPE=%27GREGORIAN%27&RANGE_UNITS=%27KM%27&SUPPRESS_RANGE_RATE=%27YES%27&APPARENT=%27AIRLESS%27&ANG_FORMAT=%27DEG%27&EXTRA_PREC=%27YES%27&ELEV_CUT=%27-90%27&SKIP_DAYLT=%27NO%27",
+        "sha256": "40e0c60cd2e58acef215f2ed65e445a19dbbfa5e593ab163fe865cb81f319ef4"
+      }
+    ],
+    "assumptions": [
+      "Airless apparent body-centre positions; angular diameter is the equatorial full-disc width.",
+      "Input latitude is planetocentric; radial elevation uses a 1737400 m sphere in MOON_ME_DE421.",
+      "Horizons documents lunar mean-Earth orientation relative to DE421; actual source headers are retained.",
+      "Terrain visibility, illumination fraction and site safety have not been calculated.",
+      "Future UTC uses Horizons' current leap-second assumptions; cached acquisitions are not automatically refreshed.",
+      "Representative native DEM pixel in the named NASA study area; not a landing-site approval.",
+      "Selected nearest the tile centre with positive native LOLA sample count and finite quality layers.",
+      "Pixel-centre coordinates use the source CRS and NASA documented MOON_ME_DE421 frame.",
+      "DEM interpolation and uncertainty remain; local slope is not a lander-specific safety certification.",
+      "Bounds conservatively enclose the source tile; horizon visibility has not been computed.",
+      "DEMs use the NASA-documented lunar mean-Earth frame, metres and a 1737400 m sphere.",
+      "Sample preferred local terrain first, falling back only to valid source heights in the broader DEM.",
+      "Terrain sampling is bilinear; the finite radial/azimuth grid can miss subgrid or more distant obstructions.",
+      "Any unresolved sample makes the entire sampled ray unknown; no edge clipping or median-filled nodata.",
+      "Search radius 150000 m; azimuth spacing 0.25 deg; near/far radial spacing 5/20 m.",
+      "Complete coverage describes the configured sampled rays, not all possible terrain directions or distances.",
+      "Horizon method and parameters: true-bearing-spherical-raster-horizon-v1 {\"azimuth_step_deg\": 0.25, \"coverage_definition\": \"All sampled points known within the finite search radius; angular/radial resolution limits remain.\", \"interpolation\": \"bilinear terrain, circular-linear skyline\", \"max_radius_m\": 150000, \"near_radius_m\": 2000, \"near_step_m\": 5, \"radial_samples\": 7800, \"radial_step_m\": 20}",
+      "Horizon angles are circularly interpolated between supplied azimuths; missing endpoints remain unknown.",
+      "Sunlight hours are full-sun-equivalent hours from a uniform circular disc above a locally straight horizon.",
+      "Sun visible means any positive disc fraction; Earth visible means its apparent centre is strictly above terrain.",
+      "Each sample governs [MET_i,MET_i+1); the endpoint adds no duration. Event times are sample-limited, not refined.",
+      "Unknown positive-duration intervals make affected whole-mission metrics null; no missing time is silently counted.",
+      "Both-visible hours use any sunlight plus Earth-centre visibility; DTE is geometry, not guaranteed radio service.",
+      "Slope bands are project screening heuristics, not a lander-specific touchdown certification.",
+      "Align scenarios on the union of elapsed-time sample boundaries, not absolute UTC.",
+      "Diagnostic windows describe gained/lost boolean visibility; partial-disc differences also affect sunlight-hour deltas.",
+      "Each scenario is left-held between its own samples. Unknown comparisons produce no claimed gain/loss.",
+      "Causal text describes geometry at the interval start, not an identified geological feature or a constant obstruction."
+    ]
+  },
+  "scenario_a_id": "analysis-83526dc582d49e81c7f4982d",
+  "scenario_b_id": "analysis-bdfc2955855d1a12daf3cbec",
+  "duration_hours": 336.0,
+  "alignment": "mission_elapsed_time",
+  "delta_convention": "B_minus_A",
+  "deltas": {
+    "sunlight_hours": -46.21115146930509,
+    "max_darkness_hours": 0.0,
+    "earth_visible_hours": 10.0
+  },
+  "diagnostic_intervals": [
+    {
+      "type": "GAINED_EARTH_VISIBILITY",
+      "start_met_hours": 41.5,
+      "end_met_hours": 89.5,
+      "reason": "At interval start MET +41.5 h: A Earth centre -1.702 deg, terrain 0.956 deg at azimuth 132.596 deg; B Earth centre 1.108 deg, terrain 1.093 deg at azimuth 130.728 deg. Sampled geometry; conditions may vary within the interval."
+    },
+    {
+      "type": "LOST_SUNLIGHT",
+      "start_met_hours": 216.0,
+      "end_met_hours": 264.0,
+      "reason": "At interval start MET +216 h: A Sun centre 1.098 deg, terrain 0.535 deg at azimuth 142.551 deg, exposed disc 1.000; B Sun centre 1.255 deg, terrain 1.534 deg at azimuth 118.293 deg, exposed disc 0.000. Sampled geometry; conditions may vary within the interval."
+    },
+    {
+      "type": "GAINED_SUNLIGHT",
+      "start_met_hours": 275.5,
+      "end_met_hours": 288.0,
+      "reason": "At interval start MET +275.5 h: A Sun centre 1.300 deg, terrain 1.614 deg at azimuth 112.481 deg, exposed disc 0.000; B Sun centre 1.505 deg, terrain 1.768 deg at azimuth 88.208 deg, exposed disc 0.002. Sampled geometry; conditions may vary within the interval."
+    },
+    {
+      "type": "LOST_EARTH_VISIBILITY",
+      "start_met_hours": 298.0,
+      "end_met_hours": 336.0,
+      "reason": "At interval start MET +298 h: A Earth centre 3.491 deg, terrain 0.745 deg at azimuth 140.389 deg; B Earth centre 0.479 deg, terrain 0.483 deg at azimuth 143.090 deg. Sampled geometry; conditions may vary within the interval."
+    },
+    {
+      "type": "GAINED_SUNLIGHT",
+      "start_met_hours": 307.5,
+      "end_met_hours": 323.5,
+      "reason": "At interval start MET +307.5 h: A Sun centre 1.435 deg, terrain 1.757 deg at azimuth 96.301 deg, exposed disc 0.000; B Sun centre 1.644 deg, terrain 1.909 deg at azimuth 72.013 deg, exposed disc 0.001. Sampled geometry; conditions may vary within the interval."
+    },
+    {
+      "type": "LOST_SUNLIGHT",
+      "start_met_hours": 335.5,
+      "end_met_hours": 336.0,
+      "reason": "At interval start MET +335.5 h: A Sun centre 1.557 deg, terrain 1.813 deg at azimuth 82.137 deg, exposed disc 0.007; B Sun centre 1.756 deg, terrain 2.036 deg at azimuth 57.832 deg, exposed disc 0.000. Sampled geometry; conditions may vary within the interval."
+    }
+  ]
+}

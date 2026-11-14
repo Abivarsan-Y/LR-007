@@ -21,7 +21,17 @@ export function MissionSetupPanel({ sites, value, onChange }: Props) {
     <select id="height" value={value.observerHeightM} onChange={e => onChange({ ...value, observerHeightM: Number(e.target.value) })}>
       <option value={2}>2 m · Lander deck</option><option value={5}>5 m · Raised mast</option>
     </select>
-    <div className="note"><span className="eyebrow">PLANNING PREVIEW</span><p>Controls save your setup locally in this session. Analysis will connect in a later phase.</p></div>
+    <label htmlFor="duration">Mission duration <span>{value.durationDays} days</span></label>
+    <input id="duration" type="range" min={7} max={28} step={1} value={value.durationDays}
+      onChange={e => onChange({ ...value, durationDays: Number(e.target.value) })} />
+    <p className="muted">Scenario B start delay</p>
+    <div className="view-toggle analytics-options" role="group" aria-label="Scenario B start delay">
+      {([0, 24, 48] as const).map(delayHours => <button key={delayHours} type="button"
+        aria-pressed={value.delayHours === delayHours} onClick={() => onChange({ ...value, delayHours })}>
+        {delayHours === 0 ? '0 h' : `+${delayHours} h`}
+      </button>)}
+    </div>
+    <div className="note"><span className="eyebrow">PLANNING PREVIEW</span><p>Dates and duration set the sample timeline. Site and observer height do not recalculate the sample science.</p></div>
     <div className="region"><span className="status-dot" /> LUNAR SOUTH POLE <small>85°S — 90°S</small></div>
   </section>
 }
