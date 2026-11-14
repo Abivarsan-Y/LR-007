@@ -1,0 +1,29 @@
+name: Cesium prototype
+on:
+  push:
+    paths:
+      - 'experiments/cesium-lab/**'
+      - 'frontend/src/scene/terrain.mjs'
+      - 'data/processed/site01_connecting_ridge_terrain.*'
+      - 'backend/tests/fixtures/science/site01/analysis_nominal.json'
+      - '.github/workflows/cesium-lab.yml'
+  pull_request:
+    paths:
+      - 'experiments/cesium-lab/**'
+      - 'frontend/src/scene/terrain.mjs'
+      - 'data/processed/site01_connecting_ridge_terrain.*'
+      - 'backend/tests/fixtures/science/site01/analysis_nominal.json'
+      - '.github/workflows/cesium-lab.yml'
+permissions:
+  contents: read
+jobs:
+  prototype:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm --prefix experiments/cesium-lab ci
+      - run: npm --prefix experiments/cesium-lab test
+      - run: npm --prefix experiments/cesium-lab run build
