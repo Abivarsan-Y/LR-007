@@ -6,8 +6,8 @@
     "sources": [
       {
         "id": "NASA_LOLA_80MPP",
-        "uri": "https://pgda.gsfc.nasa.gov/products/90",
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif",
+        "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e"
       }
     ],
     "assumptions": [
@@ -17,15 +17,15 @@
   },
   "site_id": "site01_connecting_ridge",
   "asset_path": "data/processed/site01_connecting_ridge_terrain.bin",
-  "sha256": "fde064a89f91591c15551f35191ae8bee7904db0976c6051fcacd84021c97af8",
+  "sha256": "ea3bc4681473ca7229dd65e56f45f4d80d10c3288a4a1815f6de47287da6d062",
   "encoding": "float32_le",
-  "width": 64,
-  "height": 64,
-  "spacing_m": 79.36507936507937,
+  "width": 129,
+  "height": 129,
+  "spacing_m": 20.0,
   "coordinates": {
-    "latitude_deg": -89.44,
-    "longitude_deg": -138.0,
-    "elevation_m": 1850.0,
+    "latitude_deg": -89.46315775697231,
+    "longitude_deg": -137.50198490762307,
+    "elevation_m": 1944.76708984375,
     "frame": "MOON_ME_DE421",
     "reference_radius_m": 1737400
   },

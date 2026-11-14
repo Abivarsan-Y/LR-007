@@ -16,49 +16,49 @@
     ]
   },
   "origin_site_id": "site07_malapert_mountain",
-  "search_radius_m": 2250.0,
+  "search_radius_m": 1152.0,
   "candidates": [
     {
       "site_id": "site07_malapert_mountain_safe_haven_1",
       "coordinates": {
-        "latitude_deg": -86.02122,
-        "longitude_deg": 1.93312,
-        "elevation_m": -2823.6,
+        "latitude_deg": -86.00866,
+        "longitude_deg": 2.80194,
+        "elevation_m": 5143.8,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1709.58,
-      "bearing_deg": 248.2,
-      "slope_deg": 0.52,
-      "sunlight_fraction_delta": 0.035
+      "distance_m": 975.29,
+      "bearing_deg": 15.46,
+      "slope_deg": 0.39,
+      "sunlight_fraction_delta": 0.028
     },
     {
       "site_id": "site07_malapert_mountain_safe_haven_2",
       "coordinates": {
-        "latitude_deg": -86.00641,
-        "longitude_deg": 2.56453,
-        "elevation_m": -2837.4,
+        "latitude_deg": -86.03851,
+        "longitude_deg": 2.54625,
+        "elevation_m": 5069.3,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1058.86,
-      "bearing_deg": 192.99,
-      "slope_deg": 1.48,
-      "sunlight_fraction_delta": 0.031
+      "distance_m": 325.58,
+      "bearing_deg": 280.62,
+      "slope_deg": 0.75,
+      "sunlight_fraction_delta": 0.05
     },
     {
       "site_id": "site07_malapert_mountain_safe_haven_3",
       "coordinates": {
-        "latitude_deg": -85.97246,
-        "longitude_deg": 2.54289,
-        "elevation_m": -2779.6,
+        "latitude_deg": -86.03714,
+        "longitude_deg": 3.1371,
+        "elevation_m": 5085.1,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 2077.18,
-      "bearing_deg": 186.58,
-      "slope_deg": 2.42,
-      "sunlight_fraction_delta": 0.051
+      "distance_m": 920.87,
+      "bearing_deg": 87.51,
+      "slope_deg": 1.45,
+      "sunlight_fraction_delta": 0.05
     }
   ]
 }

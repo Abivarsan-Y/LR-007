@@ -16,48 +16,48 @@
     ]
   },
   "origin_site_id": "site09_haworth_floor",
-  "search_radius_m": 2250.0,
+  "search_radius_m": 1152.0,
   "candidates": [
     {
       "site_id": "site09_haworth_floor_safe_haven_1",
       "coordinates": {
-        "latitude_deg": -87.44405,
-        "longitude_deg": -5.58985,
-        "elevation_m": -1821.5,
+        "latitude_deg": -87.4259,
+        "longitude_deg": -5.27577,
+        "elevation_m": -3332.4,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1716.93,
-      "bearing_deg": 326.31,
-      "slope_deg": 0.14,
-      "sunlight_fraction_delta": 0.076
+      "distance_m": 1020.78,
+      "bearing_deg": 214.62,
+      "slope_deg": 1.28,
+      "sunlight_fraction_delta": 0.05
     },
     {
       "site_id": "site09_haworth_floor_safe_haven_2",
       "coordinates": {
-        "latitude_deg": -87.38392,
-        "longitude_deg": -4.88545,
-        "elevation_m": -2053.6,
+        "latitude_deg": -87.39187,
+        "longitude_deg": -5.01764,
+        "elevation_m": -3378.1,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 501.95,
-      "bearing_deg": 198.43,
-      "slope_deg": 1.1,
+      "distance_m": 388.33,
+      "bearing_deg": 304.51,
+      "slope_deg": 0.15,
       "sunlight_fraction_delta": 0.05
     },
     {
       "site_id": "site09_haworth_floor_safe_haven_3",
       "coordinates": {
-        "latitude_deg": -87.40317,
-        "longitude_deg": -3.8794,
-        "elevation_m": -2054.0,
+        "latitude_deg": -87.4359,
+        "longitude_deg": -4.57167,
+        "elevation_m": -3361.9,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1269.84,
-      "bearing_deg": 90.0,
-      "slope_deg": 0.7,
+      "distance_m": 1132.96,
+      "bearing_deg": 159.33,
+      "slope_deg": 1.61,
       "sunlight_fraction_delta": 0.05
     }
   ]

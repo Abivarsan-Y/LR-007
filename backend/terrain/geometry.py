@@ -1,6 +1,7 @@
 """
 Lunar Coordinate Transformations, Projections, and Curvature Geometry.
-Conforms to NASA LOLA polar stereographic definitions and MOON_ME frame.
+Conforms strictly to NASA LOLA South Polar Stereographic definitions (+proj=stere +lat_0=-90 +lat_ts=-90 +lon_0=0 +R=1737400)
+and the MOON_ME / DE421 reference frame.
 """
 
 import math
@@ -19,7 +20,12 @@ def latlon_to_polar_stereo(
     """
     Convert Planetocentric Latitude and East Longitude to South Polar Stereographic (x, y) in meters.
     Standard parallel: -90.0° (tangent at South Pole), central meridian: 0.0° E.
-    Latitude must be in [-90.0, 0.0]. Supports both scalar floats and numpy arrays.
+    NASA convention:
+        colat = 90.0° + lat_deg
+        r = 2 * R * tan(colat / 2)
+        X = r * sin(lon)
+        Y = +r * cos(lon)
+    Supports both scalar floats and numpy arrays.
     """
     is_array = isinstance(lat_deg, np.ndarray) or isinstance(lon_deg, np.ndarray)
     
@@ -33,7 +39,7 @@ def latlon_to_polar_stereo(
         r = 2.0 * r_moon * np.tan(colat / 2.0)
         lon_rad = np.radians(lons)
         x = r * np.sin(lon_rad)
-        y = -r * np.cos(lon_rad)
+        y = r * np.cos(lon_rad)
         return x, y
     else:
         if lat_deg > 0.0:
@@ -43,7 +49,7 @@ def latlon_to_polar_stereo(
         r = 2.0 * r_moon * math.tan(colat / 2.0)
         lon_rad = math.radians(lon_deg)
         x = r * math.sin(lon_rad)
-        y = -r * math.cos(lon_rad)
+        y = r * math.cos(lon_rad)
         return float(x), float(y)
 
 
@@ -54,6 +60,11 @@ def polar_stereo_to_latlon(
 ) -> Tuple[Union[float, np.ndarray], Union[float, np.ndarray]]:
     """
     Convert South Polar Stereographic (x, y) in meters back to Planetocentric (lat, lon) in degrees.
+    NASA convention:
+        r = sqrt(x^2 + y^2)
+        colat = 2 * atan(r / (2 * R))
+        lat = colat - 90.0°
+        lon = atan2(x, y)
     Supports both scalar floats and numpy arrays.
     """
     is_array = isinstance(x_m, np.ndarray) or isinstance(y_m, np.ndarray)
@@ -66,7 +77,7 @@ def polar_stereo_to_latlon(
         colat = 2.0 * np.arctan(r / (2.0 * r_moon))
         lat_deg = np.degrees(colat) - 90.0
         
-        lon_rad = np.arctan2(xs, -ys)
+        lon_rad = np.arctan2(xs, ys)
         lon_deg = np.degrees(lon_rad) % 360.0
         return lat_deg, lon_deg
     else:
@@ -77,7 +88,7 @@ def polar_stereo_to_latlon(
         colat = 2.0 * math.atan(r / (2.0 * r_moon))
         lat_deg = math.degrees(colat) - 90.0
 
-        lon_rad = math.atan2(x_m, -y_m)
+        lon_rad = math.atan2(x_m, y_m)
         lon_deg = math.degrees(lon_rad) % 360.0
         return float(lat_deg), float(lon_deg)
 

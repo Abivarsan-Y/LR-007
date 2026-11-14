@@ -6,8 +6,8 @@
     "sources": [
       {
         "id": "NASA_LOLA_80MPP",
-        "uri": "https://pgda.gsfc.nasa.gov/products/90",
-        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif",
+        "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e"
       }
     ],
     "assumptions": [
@@ -16,48 +16,48 @@
     ]
   },
   "origin_site_id": "site01_connecting_ridge",
-  "search_radius_m": 2250.0,
+  "search_radius_m": 1152.0,
   "candidates": [
     {
       "site_id": "site01_connecting_ridge_safe_haven_1",
       "coordinates": {
-        "latitude_deg": -89.38847,
-        "longitude_deg": -140.00643,
-        "elevation_m": -893.2,
+        "latitude_deg": -89.46533,
+        "longitude_deg": -137.86241,
+        "elevation_m": 1950.3,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1681.72,
-      "bearing_deg": 340.71,
-      "slope_deg": 0.13,
-      "sunlight_fraction_delta": 0.046
+      "distance_m": 121.66,
+      "bearing_deg": 99.46,
+      "slope_deg": 0.44,
+      "sunlight_fraction_delta": 0.05
     },
     {
       "site_id": "site01_connecting_ridge_safe_haven_2",
       "coordinates": {
-        "latitude_deg": -89.39047,
-        "longitude_deg": -136.88548,
-        "elevation_m": -896.8,
+        "latitude_deg": -89.48559,
+        "longitude_deg": -134.96104,
+        "elevation_m": 1943.4,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1540.99,
-      "bearing_deg": 304.51,
-      "slope_deg": 0.99,
-      "sunlight_fraction_delta": 0.045
+      "distance_m": 980.82,
+      "bearing_deg": 357.66,
+      "slope_deg": 2.61,
+      "sunlight_fraction_delta": 0.05
     },
     {
       "site_id": "site01_connecting_ridge_safe_haven_3",
       "coordinates": {
-        "latitude_deg": -89.44718,
-        "longitude_deg": -138.42326,
-        "elevation_m": -1033.9,
+        "latitude_deg": -89.43326,
+        "longitude_deg": -139.16456,
+        "elevation_m": 1922.4,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 250.97,
-      "bearing_deg": 108.43,
-      "slope_deg": 0.31,
+      "distance_m": 1028.4,
+      "bearing_deg": 193.5,
+      "slope_deg": 1.36,
       "sunlight_fraction_delta": 0.05
     }
   ]
