@@ -1,0 +1,1 @@
+{"name":"horizon-ops-cesium-lab","private":true,"type":"module","version":"0.1.0","scripts":{"dev":"vite --host 127.0.0.1 --port 5176 --strictPort","build":"vite build","test":"node --test lunar.test.mjs"},"dependencies":{"cesium":"^1.135.0"},"devDependencies":{"vite":"^7.2.0"},"engines":{"node":">=22.12.0"}}
