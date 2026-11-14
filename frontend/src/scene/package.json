@@ -6,12 +6,26 @@
   "scripts": {
     "dev": "vite preview-app --config vite.config.mjs --host 127.0.0.1 --port 5174 --strictPort",
     "build": "tsc --noEmit && vite build preview-app --config vite.config.mjs",
-    "test": "node --test directions.test.mjs terrain.test.mjs"
+    "test": "node --test directions.test.mjs terrain.test.mjs terrain-json.test.mjs"
   },
-  "peerDependencies": { "react": "^19.2.0", "react-dom": "^19.2.0", "three": "^0.181.0", "@react-three/fiber": "^9.4.0" },
+  "peerDependencies": {
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.181.0",
+    "@react-three/fiber": "^9.4.0"
+  },
   "devDependencies": {
-    "react": "^19.2.0", "react-dom": "^19.2.0", "three": "^0.181.0", "@react-three/fiber": "^9.4.0",
-    "@types/react": "^19.2.0", "@types/react-dom": "^19.2.0", "@types/three": "^0.181.0", "typescript": "^5.9.3", "vite": "^7.2.0"
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "three": "^0.181.0",
+    "@react-three/fiber": "^9.4.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@types/three": "^0.181.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
   },
-  "engines": { "node": ">=22.12.0" }
+  "engines": {
+    "node": ">=22.12.0"
+  }
 }
