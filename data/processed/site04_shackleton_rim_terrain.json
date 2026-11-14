@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "0.1.0",
+    "sources": [
+      {
+        "id": "NASA_LOLA_80MPP",
+        "uri": "https://pgda.gsfc.nasa.gov/products/90",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "assumptions": [
+      "Elevation values are in metres above 1,737,400 m lunar reference sphere.",
+      "Grid is aligned to local ENU tangent plane: +X east, +Y up, -Z north."
+    ]
+  },
+  "site_id": "site04_shackleton_rim",
+  "asset_path": "data/processed/site04_shackleton_rim_terrain.bin",
+  "sha256": "24046a36c5189cb21009f1a655af7556e22b9c97df3b0566e1d3649c359dd7ca",
+  "encoding": "float32_le",
+  "width": 129,
+  "height": 129,
+  "spacing_m": 20.0,
+  "coordinates": {
+    "latitude_deg": -89.9,
+    "longitude_deg": 0.0,
+    "elevation_m": 628.19873046875,
+    "frame": "MOON_ME_DE421",
+    "reference_radius_m": 1737400
+  },
+  "layout": "row_major_north_to_south_west_to_east",
+  "height_reference": "metres_above_reference_sphere",
+  "nodata_encoding": "nan",
+  "scene_axes": "+X east, +Y up, -Z north"
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "0.1.0",
+    "sources": [
+      {
+        "id": "NASA_LOLA_80MPP",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif",
+        "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e"
+      }
+    ],
+    "assumptions": [
+      "Elevation values are in metres above 1,737,400 m lunar reference sphere.",
+      "Grid is aligned to local ENU tangent plane: +X east, +Y up, -Z north."
+    ]
+  },
+  "site_id": "site01_connecting_ridge",
+  "asset_path": "data/processed/site01_connecting_ridge_terrain.bin",
+  "sha256": "ea3bc4681473ca7229dd65e56f45f4d80d10c3288a4a1815f6de47287da6d062",
+  "encoding": "float32_le",
+  "width": 129,
+  "height": 129,
+  "spacing_m": 20.0,
+  "coordinates": {
+    "latitude_deg": -89.46315775697231,
+    "longitude_deg": -137.50198490762307,
+    "elevation_m": 1944.76708984375,
+    "frame": "MOON_ME_DE421",
+    "reference_radius_m": 1737400
+  },
+  "layout": "row_major_north_to_south_west_to_east",
+  "height_reference": "metres_above_reference_sphere",
+  "nodata_encoding": "nan",
+  "scene_axes": "+X east, +Y up, -Z north"
+}

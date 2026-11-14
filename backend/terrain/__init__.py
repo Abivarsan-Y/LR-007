@@ -11,7 +11,18 @@ from .geometry import (
 )
 from .slope import compute_slope_grid, classify_slope
 from .generator import generate_terrain_grid, TerrainConfig
-from .exporter import export_terrain_to_json
+from .ingest import LolaDemReader
+from .exporter import export_terrain_to_json, export_terrain_binary_contract
+from .horizon import (
+    compute_azimuth_horizon,
+    compute_dem_horizon,
+    build_contract_horizon_profile,
+)
+from .recommender import (
+    find_safe_havens_from_grid,
+    recommend_safe_havens_from_dem,
+    normalize_longitude,
+)
 
 __all__ = [
     "R_MOON_M",
@@ -23,5 +34,13 @@ __all__ = [
     "classify_slope",
     "generate_terrain_grid",
     "TerrainConfig",
+    "LolaDemReader",
     "export_terrain_to_json",
+    "export_terrain_binary_contract",
+    "compute_azimuth_horizon",
+    "compute_dem_horizon",
+    "build_contract_horizon_profile",
+    "find_safe_havens_from_grid",
+    "recommend_safe_havens_from_dem",
+    "normalize_longitude",
 ]

@@ -2,11 +2,11 @@
   {
     "site_id": "site01_connecting_ridge",
     "name": "Connecting Ridge (Site 01)",
-    "latitude_deg": -89.44,
-    "longitude_deg": 222.0,
-    "elevation_m": 1850.0,
+    "latitude_deg": -89.46315775697231,
+    "longitude_deg": -137.50198490762307,
+    "elevation_m": 1944.76708984375,
     "region": "Connecting Ridge / de Gerlache Corridor",
-    "description": "High-altitude ridge connecting Shackleton and de Gerlache craters. High solar illumination (~80%) and candidate area for Artemis III.",
+    "description": "High-altitude ridge connecting Shackleton and de Gerlache craters. Canonical NASA Site01 study area observation pixel.",
     "recommended_mast_m": 2.0,
     "terrain_file": "data/processed/site01_connecting_ridge.json"
   },

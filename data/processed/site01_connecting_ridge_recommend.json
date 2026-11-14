@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "0.1.0",
+    "sources": [
+      {
+        "id": "NASA_LOLA_80MPP",
+        "uri": "https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/Site01_final_adj_5mpp_surf.tif",
+        "sha256": "3ba7b97cb00a2bcf21189c3aeb535f65afc21207154ab9f0d43c5bdc1f7e747e"
+      }
+    ],
+    "assumptions": [
+      "Touchdown slope limit <= 8.0 deg per Artemis HLS / CLPS stability envelope.",
+      "Candidates ranked by low slope, local topographic prominence, and divert proximity."
+    ]
+  },
+  "origin_site_id": "site01_connecting_ridge",
+  "search_radius_m": 1152.0,
+  "candidates": [
+    {
+      "site_id": "site01_connecting_ridge_safe_haven_1",
+      "coordinates": {
+        "latitude_deg": -89.46533,
+        "longitude_deg": -137.86241,
+        "elevation_m": 1950.3,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 121.66,
+      "bearing_deg": 99.46,
+      "slope_deg": 0.44,
+      "sunlight_fraction_delta": 0.05
+    },
+    {
+      "site_id": "site01_connecting_ridge_safe_haven_2",
+      "coordinates": {
+        "latitude_deg": -89.48559,
+        "longitude_deg": -134.96104,
+        "elevation_m": 1943.4,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 980.82,
+      "bearing_deg": 357.66,
+      "slope_deg": 2.61,
+      "sunlight_fraction_delta": 0.05
+    },
+    {
+      "site_id": "site01_connecting_ridge_safe_haven_3",
+      "coordinates": {
+        "latitude_deg": -89.43326,
+        "longitude_deg": -139.16456,
+        "elevation_m": 1922.4,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 1028.4,
+      "bearing_deg": 193.5,
+      "slope_deg": 1.36,
+      "sunlight_fraction_delta": 0.05
+    }
+  ]
+}
