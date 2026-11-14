@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "synthetic",
+    "model_version": "fixture-0.1.0",
+    "sources": [],
+    "assumptions": [
+      "Artificial test data; not NASA observations or a landing recommendation."
+    ]
+  },
+  "scenario_a_id": "synthetic-a",
+  "scenario_b_id": "synthetic-b",
+  "duration_hours": 2,
+  "alignment": "mission_elapsed_time",
+  "delta_convention": "B_minus_A",
+  "deltas": {
+    "sunlight_hours": -1,
+    "max_darkness_hours": 1,
+    "earth_visible_hours": 0
+  },
+  "diagnostic_intervals": [
+    {
+      "type": "LOST_SUNLIGHT",
+      "start_met_hours": 1,
+      "end_met_hours": 2,
+      "reason": "Synthetic B has a higher terrain obstruction during this interval."
+    }
+  ]
+}

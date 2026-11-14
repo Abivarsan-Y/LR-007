@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horizon-ops:recommend:0.1.0",
+  "title": "HORIZON OPS recommend draft contract",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "data_kind": {
+          "enum": [
+            "synthetic",
+            "cached_real",
+            "live_real"
+          ]
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "uri",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "data_kind",
+        "model_version",
+        "sources",
+        "assumptions"
+      ],
+      "additionalProperties": false
+    },
+    "origin_site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "search_radius_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "site_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "coordinates": {
+            "type": "object",
+            "properties": {
+              "latitude_deg": {
+                "type": "number",
+                "minimum": -90,
+                "maximum": 90
+              },
+              "longitude_deg": {
+                "type": "number",
+                "minimum": -180,
+                "maximum": 180
+              },
+              "elevation_m": {
+                "type": "number"
+              },
+              "frame": {
+                "const": "MOON_ME_DE421"
+              },
+              "reference_radius_m": {
+                "const": 1737400
+              }
+            },
+            "required": [
+              "latitude_deg",
+              "longitude_deg",
+              "elevation_m",
+              "frame",
+              "reference_radius_m"
+            ],
+            "additionalProperties": false
+          },
+          "distance_m": {
+            "type": "number",
+            "minimum": 0
+          },
+          "bearing_deg": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 360
+          },
+          "slope_deg": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 90
+          },
+          "sunlight_fraction_delta": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": -1,
+                "maximum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "site_id",
+          "coordinates",
+          "distance_m",
+          "bearing_deg",
+          "slope_deg",
+          "sunlight_fraction_delta"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "provenance",
+    "origin_site_id",
+    "search_radius_m",
+    "candidates"
+  ],
+  "additionalProperties": false
+}

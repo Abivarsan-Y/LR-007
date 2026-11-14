@@ -148,9 +148,13 @@ class TestTerrainGeneratorAndExport(unittest.TestCase):
         with open(fixture_path, "r", encoding="utf-8") as f:
             fixture_data = json.load(f)
 
-        self.assertEqual(fixture_data["schema_version"], "1.0")
-        self.assertIn("heights", fixture_data)
-        self.assertEqual(len(fixture_data["heights"]), fixture_data["grid"]["cols"] * fixture_data["grid"]["rows"])
+        self.assertIn(fixture_data.get("schema_version"), ["0.1.0", "1.0"])
+        # Either direct heights array or binary asset path descriptor from Member D
+        if "heights" in fixture_data:
+            self.assertEqual(len(fixture_data["heights"]), fixture_data["grid"]["cols"] * fixture_data["grid"]["rows"])
+        else:
+            self.assertIn("asset_path", fixture_data)
+            self.assertTrue(Path(fixture_data["asset_path"]).exists())
 
 
 if __name__ == "__main__":

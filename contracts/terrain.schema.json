@@ -1,66 +1,155 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "TerrainHeightGrid",
-  "description": "Compact 3D terrain height-grid contract delivered by Person B to Member D for Three.js rendering.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horizon-ops:terrain:0.1.0",
+  "title": "HORIZON OPS terrain draft contract",
   "type": "object",
-  "required": [
-    "schema_version",
-    "site_id",
-    "name",
-    "coordinates",
-    "grid",
-    "observer",
-    "heights"
-  ],
   "properties": {
     "schema_version": {
-      "type": "string",
-      "enum": ["1.0"]
+      "const": "0.1.0"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "data_kind": {
+          "enum": [
+            "synthetic",
+            "cached_real",
+            "live_real"
+          ]
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "uri",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "data_kind",
+        "model_version",
+        "sources",
+        "assumptions"
+      ],
+      "additionalProperties": false
     },
     "site_id": {
       "type": "string",
-      "description": "Unique identifier for the lunar landing site"
+      "minLength": 1
     },
-    "name": {
+    "asset_path": {
       "type": "string",
-      "description": "Human-readable site name"
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "encoding": {
+      "const": "float32_le"
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "spacing_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
     },
     "coordinates": {
       "type": "object",
-      "required": ["lat_deg", "lon_deg", "elevation_m"],
       "properties": {
-        "lat_deg": { "type": "number", "minimum": -90.0, "maximum": 0.0 },
-        "lon_deg": { "type": "number", "minimum": 0.0, "maximum": 360.0 },
-        "elevation_m": { "type": "number" }
-      }
+        "latitude_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "elevation_m": {
+          "type": "number"
+        },
+        "frame": {
+          "const": "MOON_ME_DE421"
+        },
+        "reference_radius_m": {
+          "const": 1737400
+        }
+      },
+      "required": [
+        "latitude_deg",
+        "longitude_deg",
+        "elevation_m",
+        "frame",
+        "reference_radius_m"
+      ],
+      "additionalProperties": false
     },
-    "grid": {
-      "type": "object",
-      "required": ["cols", "rows", "physical_width_m", "physical_height_m", "step_m", "min_elevation_m", "max_elevation_m"],
-      "properties": {
-        "cols": { "type": "integer", "minimum": 16 },
-        "rows": { "type": "integer", "minimum": 16 },
-        "physical_width_m": { "type": "number", "positive": true },
-        "physical_height_m": { "type": "number", "positive": true },
-        "step_m": { "type": "number", "positive": true },
-        "min_elevation_m": { "type": "number" },
-        "max_elevation_m": { "type": "number" }
-      }
+    "layout": {
+      "const": "row_major_north_to_south_west_to_east"
     },
-    "observer": {
-      "type": "object",
-      "required": ["grid_x", "grid_y", "deck_height_m", "mast_height_m"],
-      "properties": {
-        "grid_x": { "type": "integer" },
-        "grid_y": { "type": "integer" },
-        "deck_height_m": { "type": "number", "default": 2.0 },
-        "mast_height_m": { "type": "number", "default": 5.0 }
-      }
+    "height_reference": {
+      "const": "metres_above_reference_sphere"
     },
-    "heights": {
-      "type": "array",
-      "description": "Row-major flat 1D array of absolute elevations in meters (length = cols * rows)",
-      "items": { "type": "number" }
+    "nodata_encoding": {
+      "const": "nan"
+    },
+    "scene_axes": {
+      "const": "+X east, +Y up, -Z north"
     }
-  }
+  },
+  "required": [
+    "schema_version",
+    "provenance",
+    "site_id",
+    "asset_path",
+    "sha256",
+    "encoding",
+    "width",
+    "height",
+    "spacing_m",
+    "coordinates",
+    "layout",
+    "height_reference",
+    "nodata_encoding",
+    "scene_axes"
+  ],
+  "additionalProperties": false
 }

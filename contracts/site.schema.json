@@ -1,26 +1,156 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "LunarSiteDefinition",
-  "description": "Metadata specification for curated lunar candidate landing sites.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horizon-ops:site:0.1.0",
+  "title": "HORIZON OPS site draft contract",
   "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "data_kind": {
+          "enum": [
+            "synthetic",
+            "cached_real",
+            "live_real"
+          ]
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "uri",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "data_kind",
+        "model_version",
+        "sources",
+        "assumptions"
+      ],
+      "additionalProperties": false
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "coordinates": {
+      "type": "object",
+      "properties": {
+        "latitude_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "elevation_m": {
+          "type": "number"
+        },
+        "frame": {
+          "const": "MOON_ME_DE421"
+        },
+        "reference_radius_m": {
+          "const": 1737400
+        }
+      },
+      "required": [
+        "latitude_deg",
+        "longitude_deg",
+        "elevation_m",
+        "frame",
+        "reference_radius_m"
+      ],
+      "additionalProperties": false
+    },
+    "dem_bounds": {
+      "type": "object",
+      "properties": {
+        "west_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "east_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "south_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "north_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        }
+      },
+      "required": [
+        "west_deg",
+        "east_deg",
+        "south_deg",
+        "north_deg"
+      ],
+      "additionalProperties": false
+    },
+    "terrain_coverage": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ]
+    }
+  },
   "required": [
+    "schema_version",
+    "provenance",
     "site_id",
     "name",
-    "latitude_deg",
-    "longitude_deg",
-    "elevation_m",
-    "region",
-    "description"
+    "coordinates",
+    "dem_bounds",
+    "terrain_coverage"
   ],
-  "properties": {
-    "site_id": { "type": "string" },
-    "name": { "type": "string" },
-    "latitude_deg": { "type": "number", "minimum": -90.0, "maximum": 0.0 },
-    "longitude_deg": { "type": "number", "minimum": 0.0, "maximum": 360.0 },
-    "elevation_m": { "type": "number" },
-    "region": { "type": "string" },
-    "description": { "type": "string" },
-    "recommended_mast_m": { "type": "number", "default": 2.0 },
-    "terrain_file": { "type": "string" }
-  }
+  "additionalProperties": false
 }
