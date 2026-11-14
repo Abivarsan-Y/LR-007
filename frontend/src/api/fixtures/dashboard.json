@@ -8,6 +8,7 @@
   "defaults": {
     "siteId": "connecting-ridge",
     "startDateUtc": "2026-11-14",
-    "observerHeightM": 2
+    "observerHeightM": 2,
+    "durationDays": 7
   }
 }

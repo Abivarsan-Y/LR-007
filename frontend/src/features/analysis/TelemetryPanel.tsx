@@ -1,14 +1,21 @@
-import { Moon, Radio, Sun, ArrowLeftRight } from 'lucide-react'
-import type { DashboardPreview } from '../../api/types'
+import { Moon, Radio, Sun } from 'lucide-react'
+import type { MissionSample } from './missionPreview'
+import { summarize } from './missionPreview'
 
-export function TelemetryPanel({ metrics }: { metrics: DashboardPreview['metrics'] }) {
-  return <aside className="telemetry" aria-label="Telemetry and comparison">
-    <section className="panel"><div className="panel-heading"><Radio size={17} /><h2>Mission telemetry</h2></div><p className="muted">Sample data</p>
-      <div className="metric"><Sun size={19} className="amber" /><span>Sunlight availability<strong>{metrics.sunlightPercent}<small>%</small></strong></span></div>
-      <div className="metric"><Moon size={19} /><span>Longest darkness<strong>{metrics.maxDarknessHours}<small>h</small></strong></span></div>
-      <div className="metric"><Radio size={19} className="cyan" /><span>Direct-to-Earth visibility<strong>{metrics.dtePercent}<small>%</small></strong></span></div>
-      <p className="footnote">Sample values do not change with mission setup and are not landing guidance.</p>
+export function TelemetryPanel({ samples, current }: { samples: MissionSample[]; current: MissionSample }) {
+  const { sun, earth, darkest, durationHours } = summarize(samples)
+  return <aside className="telemetry" aria-label="Sample mission telemetry">
+    <section className="panel">
+      <div className="panel-heading"><Radio size={17} /><h2>Mission telemetry</h2></div>
+      <p className="muted">Sample data · Scenario A</p>
+      <div className="metric"><Sun size={19} className="amber" /><span>Sunlight availability<strong>{(100 * sun / durationHours).toFixed(1)}<small>%</small></strong></span></div>
+      <div className="metric"><Moon size={19} /><span>Longest darkness<strong>{darkest}<small>h</small></strong></span></div>
+      <div className="metric"><Radio size={19} className="cyan" /><span>Earth visibility<strong>{(100 * earth / durationHours).toFixed(1)}<small>%</small></strong></span></div>
+      <div className="analytics-card analytics-now">
+        <strong>At +{current.met_hours} h</strong>
+        <span>Sun {current.sun.visible ? 'visible' : 'obscured'}</span>
+        <span>Earth {current.earth.visible ? 'visible' : 'obscured'}</span>
+      </div>
     </section>
-    <section className="panel comparison"><div className="panel-heading"><ArrowLeftRight size={17} /><h2>LunaDiff</h2></div><p className="muted">See what changed. See why.</p><div className="comparison-row"><span>Sunlight delta</span><strong>—</strong></div><div className="comparison-row"><span>Darkness delta</span><strong>—</strong></div><div className="comparison-row"><span>Earth-link delta</span><strong>—</strong></div><p className="footnote">Scenario comparison arrives in a later phase.</p></section>
   </aside>
 }

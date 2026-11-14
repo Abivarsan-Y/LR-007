@@ -443,3 +443,43 @@ body {
   .view-toggle button { padding-inline: 7px; }
 }
 .timeline input:not(:disabled) { opacity: 1; cursor: pointer; }
+
+
+/* Mission analytics and polar explorer */
+.analytics-panel { grid-column: 1 / -1; min-width: 0; }
+.analytics-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.analytics-card { padding: 13px; border: 1px solid #354160; border-radius: 13px; background: linear-gradient(130deg, #1d3048, #191a31 72%); }
+.analytics-summary .analytics-card:nth-child(2) { background: linear-gradient(130deg, #302444, #191a31 72%); }
+.analytics-summary .analytics-card:nth-child(3) { background: linear-gradient(130deg, #153b42, #151b31 80%); }
+.analytics-card span, .analytics-card small { display: block; color: #b6c5df; font-size: 12px; }
+.analytics-summary strong { display: block; margin: 5px 0; font-size: 23px; font-variant-numeric: tabular-nums; }
+.analytics-now { margin-top: 14px; }
+.analytics-now span { margin-top: 5px; }
+.analytics-options { width: fit-content; }
+.timeline-tools, .analytics-horizon-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.analytics-horizon-heading { justify-content: space-between; }
+.timeline input:not(:disabled) { opacity: 1; cursor: pointer; }
+.analytics-button, .diff-windows button { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; min-height: 44px; border: 1px solid #445677; border-radius: 9px; background: #17263c; color: #edf2ff; font-size: 12px; }
+.analytics-button:hover, .diff-windows button:hover, .diff-windows button[aria-pressed=true] { border-color: #85e6f4; background: #233653; }
+.analytics-button:disabled { opacity: .65; cursor: wait; }
+.diff-row { margin-bottom: 16px; }
+.diff-row > strong { font-size: 13px; }
+.diff-track { height: 9px; position: relative; overflow: hidden; margin: 8px 0; border-radius: 6px; background: #0d1527; }
+.diff-track span { position: absolute; height: 100%; }
+.diff-track .gained { background: #7de5c1; }
+.diff-track .lost { background: #f09cb9; }
+.diff-windows { display: flex; flex-wrap: wrap; gap: 6px; }
+.diff-windows .gained { color: #a5f4da; }
+.diff-windows .lost { color: #ffbed2; }
+.obstruction p, .polar-detail p { margin: 5px 0; color: #c6d4eb; font-size: 12px; line-height: 1.5; }
+.analytics-chart { background: #10192b; padding: 8px; border-radius: 12px; margin-top: 8px; }
+.analytics-chart svg { display: block; width: min(100%, 760px); margin: auto; }
+.analytics-chart text, .polar-map text { fill: #cad7ec; font-size: 10px; }
+.analytics-key { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; color: #cad7ec; font-size: 11px; }
+.sun-key { color: #ffd38a; }
+.earth-key { color: #79ebf6; }
+.polar-map { min-width: 0; padding: 0 16px 14px; }
+.polar-map svg { display: block; width: min(100%, 400px); margin: auto; cursor: crosshair; }
+.polar-map svg:focus-visible { outline: 2px solid #79ebf6; }
+.polar-map .diff-windows, .polar-detail { margin-top: 10px; }
+@media(max-width: 520px) { .analytics-summary { grid-template-columns: 1fr; } }
