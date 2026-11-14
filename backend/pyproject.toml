@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=80,<83"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "horizon-ops-backend"
+dynamic = ["version"]
+description = "Scientific API for the HORIZON OPS lunar landing-site navigator"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fastapi>=0.162.7,<0.163",
+    "pydantic>=2.12,<3",
+    "pydantic-settings>=2.16.3,<3",
+    "uvicorn>=0.54,<0.55",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx2>=2.16,<3",
+    "pytest>=9.2,<10",
+]
+
+[tool.setuptools]
+package-dir = {backend = "."}
+packages = ["backend", "backend.app", "backend.app.schemas", "backend.engine"]
+
+[tool.setuptools.dynamic]
+version = {attr = "backend.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
