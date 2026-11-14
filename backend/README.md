@@ -1,9 +1,10 @@
-# Member A — Phases 1–2 backend
+# Member A — Phases 1–3 backend
 
 FastAPI foundation for HORIZON OPS. Requires **Python 3.14**. The only application
 endpoint is `GET /api/health`. Phase 2 adds a standalone Horizons client and
-offline cache; terrain visibility and science HTTP endpoints belong to later
-phases. No NASA service or dataset is needed to start the health API.
+offline cache. Phase 3 adds terrain horizons, visibility, metrics and LunaDiff
+as pure functions and local commands. Science HTTP endpoints are Phase 4 work.
+No NASA service or dataset is needed to start the health API.
 
 ## Install, run and test
 
@@ -161,3 +162,69 @@ provide corruption detection, not proof against deliberate tampering.
 The ephemeris tests replay real recordings without live services and verify
 parser failures, observer/time identity, bounded retries, offline operation,
 atomic writes and compatibility with D's draft sample/provenance definitions.
+
+## Phase 3: terrain visibility and LunaDiff
+
+The new modules calculate a source-backed terrain skyline, apply it to Sun/Earth
+positions, integrate sunlight/occlusion durations, and compare equal-duration
+missions on elapsed time. They return the existing D analysis/diff shapes.
+The health API remains the only HTTP endpoint; these commands do not wire the
+frontend to live science results yet.
+
+An included small real example can be analyzed **offline in a fresh clone**:
+
+```bash
+uv run --project backend --locked python -m backend.engine.mission analyze \
+  --ephemeris backend/tests/fixtures/science/site01/request_nominal.json \
+  --horizon backend/tests/fixtures/science/site01/horizon.json \
+  --cache-dir backend/tests/fixtures/science/site01/ephemeris \
+  --output data/cache/analyses/site01-nominal.json
+
+uv run --project backend --locked python -m backend.engine.mission analyze \
+  --ephemeris backend/tests/fixtures/science/site01/request_delay48h.json \
+  --horizon backend/tests/fixtures/science/site01/horizon.json \
+  --cache-dir backend/tests/fixtures/science/site01/ephemeris \
+  --output data/cache/analyses/site01-delay48h.json
+
+uv run --project backend --locked python -m backend.engine.mission diff \
+  --scenario-a data/cache/analyses/site01-nominal.json \
+  --scenario-b data/cache/analyses/site01-delay48h.json \
+  --output data/cache/analyses/site01-diff48h.json
+```
+
+`analyze` takes the request from the supplied Phase 2 bundle/request wrapper and
+replays the validated raw cache. It does not trust edited position arrays in
+that input file. Networking is disabled unless `--online` is explicitly set.
+The output defaults to unknown slope screening; `--slope-deg` accepts a supplied
+native slope value when its source/meaning has been reviewed.
+
+Generating a new native-raster horizon needs local DEMs and a source manifest:
+
+```bash
+uv run --project backend --locked python -m backend.engine.mission horizon \
+  --site backend/tests/fixtures/science/site01/site.json \
+  --dem data/raw/pgda/Site01_final_adj_5mpp_surf.tif \
+  --dem data/raw/pgda/LDEM_80S_20MPP_ADJ.TIF \
+  --source-manifest data/local/dataset_manifest.json \
+  --max-radius-km 150 --azimuth-step-deg 0.25 \
+  --output data/cache/horizons/site01.json
+```
+
+Source-manifest entries identify `path` relative to `--source-root` (default
+current directory), `bytes`, `sha256` and source `url`. Every DEM is size/hash
+checked before tracing; its geographic reference sphere and native affine are
+read from the file. The exact observer elevation must agree with the preferred
+DEM to 0.01 m. List high-resolution local terrain before the regional fallback.
+No large TIFFs are committed to Git; the small recorded example supplies its
+derived skyline and source hashes for offline integration tests.
+
+Library entry points:
+
+- `HorizonProfile`, `solar_disc_fraction`, `evaluate_visibility`
+- `calculate_metrics`, `visibility_intervals`
+- `build_analysis`, `calculate_luna_diff`
+- `RasterTerrain`, `compute_horizon`, `prepare_raster_horizon`
+
+See [SCIENCE.md](SCIENCE.md) for exact definitions, synthetic/real provenance,
+sampling limitations, source reproduction and measured sensitivity. The raster
+adapter is A-owned and leaves B's terrain functions and shared contracts intact.

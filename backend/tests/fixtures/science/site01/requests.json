@@ -1,0 +1,30 @@
+[
+  {
+    "observer": {
+      "site_id": "nasa-site01-observation",
+      "latitude_deg": -89.46315775697231,
+      "longitude_deg": -137.50198490762307,
+      "elevation_m": 1944.76708984375,
+      "observer_height_m": 2.0,
+      "frame": "MOON_ME_DE421",
+      "reference_radius_m": 1737400
+    },
+    "start_utc": "2026-11-15T00:00:00Z",
+    "duration_hours": 336,
+    "sample_minutes": 30
+  },
+  {
+    "observer": {
+      "site_id": "nasa-site01-observation",
+      "latitude_deg": -89.46315775697231,
+      "longitude_deg": -137.50198490762307,
+      "elevation_m": 1944.76708984375,
+      "observer_height_m": 2.0,
+      "frame": "MOON_ME_DE421",
+      "reference_radius_m": 1737400
+    },
+    "start_utc": "2026-11-17T00:00:00Z",
+    "duration_hours": 336,
+    "sample_minutes": 30
+  }
+]
