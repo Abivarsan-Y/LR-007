@@ -23,7 +23,7 @@ export interface DashboardPreview {
   }
 }
 
-export type DataKind = 'cached_real' | 'live' | 'synthetic'
+export type DataKind = 'cached_real' | 'live_real' | 'synthetic'
 
 export interface ProvenanceSource {
   id: string

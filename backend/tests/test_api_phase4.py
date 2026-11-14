@@ -23,8 +23,25 @@ HORIZONS_FIXTURES = Path(__file__).parent / "fixtures/horizons"
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("HORIZON_OPS_CORS_ORIGINS", raising=False)
-    with TestClient(create_app()) as test_client:
+    settings = Settings(
+        sites_paths=(SITE01_FIXTURES / "site.json",),
+        horizon_paths=(SITE01_FIXTURES / "horizon.json",),
+        ephemeris_cache_dirs=(SITE01_FIXTURES / "ephemeris", HORIZONS_FIXTURES),
+        analyses_cache_dir=SITE01_FIXTURES / "absent-analysis-cache",
+    )
+    with TestClient(create_app(settings)) as test_client:
         yield test_client
+
+
+def assert_recorded_analysis(actual: dict, expected: dict) -> None:
+    """Allow platform libm roundoff in disc area; compare every other field exactly."""
+    normalized = copy.deepcopy(actual)
+    for got, recorded in zip(normalized["samples"], expected["samples"], strict=True):
+        value = recorded["sun"]["illumination_fraction"]
+        if value is not None:
+            assert got["sun"]["illumination_fraction"] == pytest.approx(value, abs=1e-14, rel=0)
+            got["sun"]["illumination_fraction"] = value
+    assert normalized == expected
 
 
 def _nominal_analysis() -> dict:
@@ -87,7 +104,7 @@ def test_post_analyze_nominal_and_delay48h_offline_match_fixtures(client: TestCl
     nominal = nominal_resp.json()
     validate_document("analysis", nominal)
     expected_nominal = _nominal_analysis()
-    assert nominal == expected_nominal
+    assert_recorded_analysis(nominal, expected_nominal)
     assert nominal["provenance"]["data_kind"] == "cached_real"
     assert len(nominal["samples"]) == 673
     assert nominal["metrics"]["sunlight_hours"] == pytest.approx(249.06378983523817)
@@ -107,7 +124,7 @@ def test_post_analyze_nominal_and_delay48h_offline_match_fixtures(client: TestCl
     assert delay_resp.status_code == 200
     delay = delay_resp.json()
     validate_document("analysis", delay)
-    assert delay == _delay48h_analysis()
+    assert_recorded_analysis(delay, _delay48h_analysis())
 
 
 def test_post_analyze_accepts_explicit_observer_and_slope(client: TestClient):
@@ -273,7 +290,13 @@ def test_post_analyze_maps_ephemeris_errors_to_http_status(
         raise exc
 
     monkeypatch.setattr(HorizonsClient, "get_ephemeris", boom)
-    with TestClient(create_app()) as test_client:
+    settings = Settings(
+        sites_paths=(SITE01_FIXTURES / "site.json",),
+        horizon_paths=(SITE01_FIXTURES / "horizon.json",),
+        ephemeris_cache_dirs=(SITE01_FIXTURES / "ephemeris", HORIZONS_FIXTURES),
+        analyses_cache_dir=SITE01_FIXTURES / "absent-analysis-cache",
+    )
+    with TestClient(create_app(settings)) as test_client:
         resp = test_client.post(
             "/api/analyze",
             json={
@@ -523,7 +546,7 @@ def test_export_json_and_csv_get_and_post(client: TestClient):
         },
     )
     assert inline_get_json.status_code == 200
-    assert json.loads(inline_get_json.text) == nominal
+    assert_recorded_analysis(json.loads(inline_get_json.text), nominal)
 
     missing_target = client.get("/api/export", params={"format": "csv"})
     assert missing_target.status_code == 422

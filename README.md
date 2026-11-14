@@ -4,12 +4,11 @@ Lunar Landing Site, Mission Window & LunaDiff Navigator. Scope follows [the mast
 
 ## Current implementation
 
-- A: FastAPI health endpoint and a Horizons ephemeris client with verified real-response cache replay; analysis endpoints are not wired yet.
-- B: terrain ingestion and four JSON grid exports. Their orientation, height-reference metadata and site-elevation agreement need validation before scientific combination.
-- C/D: mission dashboard with embedded React Three Fiber terrain scene, camera controls, site-grid switching and a separate synthetic direction timeline.
-- D: draft shared JSON contracts, synthetic fixtures, loaders, validation tests and CI.
+The main app offers a recorded Connecting Ridge mission, a +48-hour arrival comparison, terrain inspection and reproducible export. Start with **Explore the verified demo**. The fixed scientific scenario is 15–29 November 2026 at a 2 m observer, with 30-minute sampling; the delayed scenario starts November 17. Source URLs, hashes and model limitations are available in **Data & method**.
 
-The default dashboard displays exported terrain for **unverified inspection only**, with neutral lighting and celestial overlays hidden. A separate synthetic mode drives the Sun/Earth markers with three explicit fixture samples. Telemetry remains synthetic and static. No terrain-aware visibility, certified landing safety, real scenario comparison or scientific shadow result is produced by this integration.
+FastAPI provides sites, analyze, diff, recommendations and JSON/CSV export. The client can replay the checked-in real Site01 records and export offline without downloading the original multi-GB DEMs. Other sites provide terrain inspection; matched real astronomy is withheld. Terrain clicks do not relocate the analyzed observer. Candidate markers screen terrain and are not certified landing sites.
+
+Rendering is illustrative. Numeric/horizon results determine visibility; Earth-centre visibility is not guaranteed radio service. Unknown scientific values remain unknown. The original renderer and raw datasets retain their documented scientific/display limitations.
 
 ## Run the dashboard
 

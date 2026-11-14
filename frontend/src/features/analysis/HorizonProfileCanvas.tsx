@@ -109,7 +109,7 @@ export function HorizonProfileCanvas({
         grad.addColorStop(0, 'rgba(226, 232, 240, 0.22)')
         grad.addColorStop(1, 'rgba(15, 23, 42, 0.35)')
         ctx.fillStyle = grad
-        ctx.fill()
+        if (horizon.every(p => p.elevation_deg !== null)) ctx.fill()
 
         // Horizon curve
         ctx.beginPath()
@@ -166,7 +166,7 @@ export function HorizonProfileCanvas({
         const earthX = azToX(earthAz)
         const earthY = elToY(currentSample.earth.elevation_deg)
         const earthVis = currentSample.earth.visible === true
-        const earthColor = earthVis ? '#34d399' : '#fb7185'
+        const earthColor = currentSample.earth.visible === null ? '#94a3b8' : earthVis ? '#34d399' : '#fb7185'
 
         ctx.strokeStyle = earthVis ? 'rgba(52, 211, 153, 0.26)' : 'rgba(251, 113, 133, 0.26)'
         ctx.lineWidth = 1
@@ -213,6 +213,8 @@ export function HorizonProfileCanvas({
   return (
     <canvas
       ref={canvasRef}
+      role="img"
+      aria-label="Terrain horizon by north-clockwise bearing with current Sun and Earth positions. Numeric directions are listed below."
       className="w-full h-full block cursor-crosshair"
       onPointerMove={e => {
         if (!horizon.length) return
