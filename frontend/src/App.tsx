@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  ChevronDown,
+  ChevronUp,
   Compass,
   Download,
   Info,
@@ -72,8 +74,9 @@ export function App() {
 
   const [overlayMode, setOverlayMode] = useState<TerrainOverlayMode>('albedo')
   const [showWireframe, setShowWireframe] = useState(false)
-  const [verticalScale, setVerticalScale] = useState<1 | 2>(2)
+  const [verticalScale, setVerticalScale] = useState<1 | 2 | 4>(1)
   const [polarOpen, setPolarOpen] = useState(false)
+  const [detailsVisible, setDetailsVisible] = useState(true)
 
   // HUD tabs & sub-selection states
   const [activeTab, setActiveTab] = useState<HudTab>('telemetry')
@@ -92,6 +95,7 @@ export function App() {
     async (site: CatalogSiteEntry, zoomSurface = true, mastOverride?: 2 | 5) => {
       const mast = mastOverride ?? observerHeightM
       setLoadingTarget(true)
+      setDetailsVisible(true)
       setHighlightedCandidateId(null)
       setDiffHighlightAzimuth(null)
       setShowProvenanceInfo(false)
@@ -119,6 +123,7 @@ export function App() {
       horizonAngles: number[] = Array.from({ length: 72 }, () => 1.5),
       zoomSurface = true,
     ) => {
+      setDetailsVisible(true)
       setHighlightedCandidateId(null)
       setDiffHighlightAzimuth(null)
       setShowProvenanceInfo(false)
@@ -238,8 +243,10 @@ export function App() {
           return
         }
         if (document.activeElement !== searchInputRef.current) {
-          clearSelection()
+          setDetailsVisible(false)
         }
+      } else if ((e.key === 'h' || e.key === 'H') && document.activeElement !== searchInputRef.current && workspace) {
+        setDetailsVisible(v => !v)
       }
     }
     document.addEventListener('pointerdown', onPointerDown)
@@ -248,7 +255,7 @@ export function App() {
       document.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKeyDown)
     }
-  }, [clearSelection, dropdownOpen, polarOpen])
+  }, [dropdownOpen, polarOpen, workspace])
 
   // Synchronized Timeline Playback
   const samples = workspace?.analysis.samples ?? []
@@ -366,6 +373,7 @@ export function App() {
         overlayMode={overlayMode}
         showWireframe={showWireframe}
         verticalScale={verticalScale}
+        observerHeightM={observerHeightM}
         onCameraModeChange={setCameraMode}
         onPickPoint={handlePickPoint}
         onSelectCatalogSite={site => void selectCatalogSite(site, true)}
@@ -546,6 +554,53 @@ export function App() {
         </div>
       )}
 
+      {/* Compact 3D Legend Pill in Surface View */}
+      {workspace && cameraMode === 'SURFACE' && (
+        <div className="hidden lg:flex fixed top-20 left-5 z-15 glass-hud rounded-xl px-3 py-2 flex-col gap-1.5 text-[9px] font-mono-tech tracking-wider uppercase text-slate-300 pointer-events-none">
+          <div className="text-slate-500 tracking-[0.16em]">3D Markers</div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span>Lander &amp; Observer Mast ({observerHeightM}m)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-[2px] bg-amber-400" />
+            <span>Sun Line-of-Sight Vector</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-[2px] bg-emerald-400" />
+            <span>Earth DTE Vector (Rose = Blocked)</span>
+          </div>
+          {workspace.recommendations && workspace.recommendations.candidates.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full border border-cyan-300" />
+              <span>Safe Havens (&lt;8° Slope)</span>
+            </div>
+          )}
+          {workspace.demTerrain && (
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 border border-emerald-400/70" />
+              <span>NASA LOLA 129×129 DEM (2.56 km)</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compact Show Details Pill When HUD Is Hidden */}
+      {workspace && !detailsVisible && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setDetailsVisible(true)}
+            className="glass-hud rounded-full px-4 py-2 text-[10px] font-mono-tech tracking-[0.16em] uppercase text-slate-100 hover:border-emerald-400/45 hover:text-emerald-300 transition shadow-[0_12px_36px_rgba(0,0,0,0.75)] inline-flex items-center gap-2"
+          >
+            <ChevronUp className="w-3.5 h-3.5 text-emerald-400" />
+            <span>{workspace.target.name}</span>
+            <span className="text-slate-500">·</span>
+            <span className="text-emerald-300">SHOW DETAILS (H)</span>
+          </button>
+        </div>
+      )}
+
       {/* Optional 2D South Pole Map Modal (Member C PolarMap integrated cleanly on demand) */}
       {polarOpen && (
         <div className="fixed top-20 right-4 sm:right-6 z-25 w-[92vw] sm:w-[370px] max-h-[75vh] overflow-y-auto hud-scroll glass-hud rounded-2xl p-4 shadow-[0_20px_60px_rgba(0,0,0,0.8)]">
@@ -573,11 +628,11 @@ export function App() {
         </div>
       )}
 
-      {/* On-Demand Bottom Glass HUD Card (Hidden until a target or location is selected) */}
+      {/* On-Demand Bottom Glass HUD Card (Hidden until selected or collapsed via Hide button) */}
       <main
-        aria-hidden={!workspace}
+        aria-hidden={!workspace || !detailsVisible}
         className={`fixed bottom-3 left-3 right-3 sm:bottom-5 sm:left-1/2 sm:-translate-x-1/2 sm:w-[820px] max-w-[96vw] z-20 glass-hud rounded-2xl p-3.5 sm:p-4.5 shadow-[0_24px_64px_rgba(0,0,0,0.82)] transition-all duration-300 ease-out ${
-          workspace
+          workspace && detailsVisible
             ? 'opacity-100 translate-y-0 pointer-events-auto'
             : 'opacity-0 translate-y-6 pointer-events-none'
         }`}
@@ -658,11 +713,13 @@ export function App() {
 
                 <button
                   type="button"
-                  onClick={clearSelection}
-                  className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition"
-                  aria-label="Close telemetry panel"
+                  onClick={() => setDetailsVisible(false)}
+                  title="Hide details panel (press H to toggle)"
+                  className="px-2 py-1 rounded-full text-[9px] font-mono-tech tracking-wider uppercase border border-white/10 bg-white/[0.03] text-slate-300 hover:text-white hover:border-white/25 transition inline-flex items-center gap-1"
+                  aria-label="Hide telemetry details panel"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <ChevronDown className="w-3 h-3" />
+                  <span className="hidden sm:inline">HIDE</span>
                 </button>
               </div>
             </div>
@@ -839,9 +896,11 @@ export function App() {
                           </button>
                           <button
                             type="button"
-                            onClick={() => setVerticalScale(v => (v === 1 ? (2 as 1 | 2) : (1 as 1 | 2)))}
+                            onClick={() =>
+                              setVerticalScale(v => (v === 1 ? 2 : v === 2 ? 4 : 1))
+                            }
                             className="px-1.5 py-0.5 rounded text-[9px] font-mono-tech uppercase border border-white/10 text-slate-400 hover:text-slate-200 transition"
-                            title="Toggle DEM Vertical Exaggeration"
+                            title="Cycle DEM Vertical Exaggeration (1× True Scale / 2× / 4×)"
                           >
                             {verticalScale}×Z
                           </button>

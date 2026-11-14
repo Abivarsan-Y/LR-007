@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js'
 import { azElToSceneDirection } from '../../scene/directions.mjs'
 import type {
   AnalysisSample,
@@ -21,14 +22,6 @@ export interface SurfacePickEvent {
   horizonAnglesDeg: number[]
 }
 
-export interface SafeHavenHighlight {
-  site_id: string
-  distance_m: number
-  bearing_deg: number
-  slope_deg: number
-  elevation_m: number
-}
-
 interface Props {
   catalogSites: CatalogSiteEntry[]
   selectedSiteId: string | null
@@ -43,14 +36,15 @@ interface Props {
   overlayMode: TerrainOverlayMode
   showWireframe: boolean
   verticalScale: number
+  observerHeightM: 2 | 5
   onCameraModeChange: (mode: 'ORBITAL' | 'SURFACE') => void
   onPickPoint: (pick: SurfacePickEvent) => void
   onSelectCatalogSite: (site: CatalogSiteEntry) => void
 }
 
 const MOON_RADIUS = 2.0
-const DEM_PATCH_HALF_EXTENT = 0.27
-const EARTH_RAD_APPROX = 1737400
+const DEM_PATCH_HALF_EXTENT = 0.30
+const LUNAR_RADIUS_M = 1737400
 const DEG_TO_RAD = Math.PI / 180
 
 interface CraterDef {
@@ -60,6 +54,15 @@ interface CraterDef {
   depth: number
   rim: number
   name: string
+  vec: THREE.Vector3
+  radiusRad: number
+}
+
+interface MareBasinDef {
+  lat: number
+  lon: number
+  radiusDeg: number
+  darkness: number
   vec: THREE.Vector3
   radiusRad: number
 }
@@ -94,29 +97,50 @@ function getLocalTangentFrame(unitPos: THREE.Vector3): {
 }
 
 const RAW_CRATERS: Omit<CraterDef, 'vec' | 'radiusRad'>[] = [
-  { lat: -89.65, lon: 185, radiusDeg: 0.95, depth: 0.0165, rim: 0.006, name: 'Shackleton' },
-  { lat: -88.1, lon: 45, radiusDeg: 1.75, depth: 0.0185, rim: 0.0052, name: 'Shoemaker' },
-  { lat: -87.3, lon: 78, radiusDeg: 1.45, depth: 0.0165, rim: 0.0048, name: 'Faustini' },
-  { lat: -87.5, lon: -15, radiusDeg: 1.85, depth: 0.0195, rim: 0.0055, name: 'Haworth' },
-  { lat: -84.9, lon: -38, radiusDeg: 2.8, depth: 0.0225, rim: 0.0068, name: 'Cabeus' },
-  { lat: -86.0, lon: 15, radiusDeg: 0.85, depth: -0.012, rim: 0.0022, name: 'Malapert' },
-  { lat: -88.4, lon: -88, radiusDeg: 1.15, depth: 0.0145, rim: 0.005, name: 'de Gerlache' },
-  { lat: -85.5, lon: 140, radiusDeg: 2.2, depth: 0.0175, rim: 0.0046, name: 'Amundsen' },
-  { lat: -82.0, lon: 110, radiusDeg: 3.4, depth: 0.021, rim: 0.0055, name: 'Scott' },
-  { lat: -81.5, lon: -120, radiusDeg: 3.1, depth: 0.0195, rim: 0.005, name: 'Drygalski' },
-  { lat: -43.3, lon: -11.2, radiusDeg: 4.5, depth: 0.022, rim: 0.006, name: 'Tycho' },
-  { lat: -52.0, lon: -165.0, radiusDeg: 14.0, depth: 0.028, rim: 0.007, name: 'SPA Basin' },
-  { lat: 9.6, lon: -20.1, radiusDeg: 4.8, depth: 0.02, rim: 0.006, name: 'Copernicus' },
-  { lat: 25.0, lon: 30.0, radiusDeg: 12.0, depth: 0.016, rim: 0.003, name: 'Serenitatis' },
-  { lat: -20.0, lon: 85.0, radiusDeg: 9.5, depth: 0.018, rim: 0.004, name: 'Smythii' },
-  { lat: 15.0, lon: -110.0, radiusDeg: 8.5, depth: 0.019, rim: 0.004, name: 'Hertzsprung' },
-  { lat: -32.0, lon: 55.0, radiusDeg: 6.2, depth: 0.017, rim: 0.004, name: 'Petavius' },
+  { lat: -89.65, lon: 185, radiusDeg: 0.95, depth: 0.0155, rim: 0.0055, name: 'Shackleton' },
+  { lat: -88.1, lon: 45, radiusDeg: 1.75, depth: 0.0175, rim: 0.0050, name: 'Shoemaker' },
+  { lat: -87.3, lon: 78, radiusDeg: 1.45, depth: 0.0155, rim: 0.0046, name: 'Faustini' },
+  { lat: -87.5, lon: -15, radiusDeg: 1.85, depth: 0.0185, rim: 0.0052, name: 'Haworth' },
+  { lat: -84.9, lon: -38, radiusDeg: 2.8, depth: 0.0205, rim: 0.0062, name: 'Cabeus' },
+  { lat: -86.0, lon: 15, radiusDeg: 0.85, depth: -0.011, rim: 0.0020, name: 'Malapert' },
+  { lat: -88.4, lon: -88, radiusDeg: 1.15, depth: 0.014, rim: 0.0048, name: 'de Gerlache' },
+  { lat: -85.5, lon: 140, radiusDeg: 2.2, depth: 0.0165, rim: 0.0044, name: 'Amundsen' },
+  { lat: -82.0, lon: 110, radiusDeg: 3.4, depth: 0.0195, rim: 0.0050, name: 'Scott' },
+  { lat: -81.5, lon: -120, radiusDeg: 3.1, depth: 0.0185, rim: 0.0048, name: 'Drygalski' },
+  { lat: -63.0, lon: -45.0, radiusDeg: 4.4, depth: 0.018, rim: 0.0055, name: 'Clavius' },
+  { lat: -43.3, lon: -11.2, radiusDeg: 4.5, depth: 0.020, rim: 0.0065, name: 'Tycho' },
+  { lat: -52.0, lon: -165.0, radiusDeg: 14.0, depth: 0.025, rim: 0.0065, name: 'SPA Basin' },
+  { lat: 9.6, lon: -20.1, radiusDeg: 4.8, depth: 0.019, rim: 0.0060, name: 'Copernicus' },
+  { lat: 12.0, lon: -47.0, radiusDeg: 3.2, depth: 0.016, rim: 0.0050, name: 'Aristarchus' },
+  { lat: 51.6, lon: -9.3, radiusDeg: 4.1, depth: 0.017, rim: 0.0052, name: 'Plato' },
+  { lat: -20.0, lon: 85.0, radiusDeg: 9.5, depth: 0.016, rim: 0.0040, name: 'Smythii' },
+  { lat: 15.0, lon: -110.0, radiusDeg: 8.5, depth: 0.017, rim: 0.0040, name: 'Hertzsprung' },
+  { lat: -32.0, lon: 55.0, radiusDeg: 6.2, depth: 0.016, rim: 0.0040, name: 'Petavius' },
 ]
 
 const CRATERS: CraterDef[] = RAW_CRATERS.map(c => ({
   ...c,
   vec: latLonToUnitVec(c.lat, c.lon),
   radiusRad: THREE.MathUtils.degToRad(c.radiusDeg),
+}))
+
+// Authentic lunar nearside/farside dark basalt Maria for orbital globe realism
+const MARIA_BASINS: MareBasinDef[] = [
+  { lat: 33.0, lon: -16.0, radiusDeg: 18.0, darkness: 0.25 }, // Mare Imbrium
+  { lat: 26.5, lon: 18.0, radiusDeg: 14.0, darkness: 0.23 },  // Mare Serenitatis
+  { lat: 8.5, lon: 31.0, radiusDeg: 15.0, darkness: 0.22 },   // Mare Tranquillitatis
+  { lat: 18.0, lon: -52.0, radiusDeg: 28.0, darkness: 0.24 }, // Oceanus Procellarum N
+  { lat: -5.0, lon: -42.0, radiusDeg: 22.0, darkness: 0.21 }, // Oceanus Procellarum S
+  { lat: -23.0, lon: -38.0, radiusDeg: 11.0, darkness: 0.19 }, // Mare Humorum
+  { lat: -21.0, lon: -17.0, radiusDeg: 14.0, darkness: 0.19 }, // Mare Nubium
+  { lat: -4.0, lon: 52.0, radiusDeg: 13.0, darkness: 0.21 },  // Mare Fecunditatis
+  { lat: 17.0, lon: 59.0, radiusDeg: 8.5, darkness: 0.24 },   // Mare Crisium
+  { lat: -15.0, lon: 35.0, radiusDeg: 10.0, darkness: 0.20 }, // Mare Nectaris
+  { lat: -53.0, lon: -168.0, radiusDeg: 26.0, darkness: 0.14 }, // SPA floor darkening
+].map(m => ({
+  ...m,
+  vec: latLonToUnitVec(m.lat, m.lon),
+  radiusRad: THREE.MathUtils.degToRad(m.radiusDeg),
 }))
 
 function hash3(x: number, y: number, z: number): number {
@@ -165,14 +189,31 @@ function fbm3D(x: number, y: number, z: number, octaves = 4): number {
   return val
 }
 
+function getLunarMareDarkening(unitVec: THREE.Vector3): number {
+  let dark = 0
+  const noiseMod = fbm3D(unitVec.x * 5.2, unitVec.y * 5.2, unitVec.z * 5.2, 3) * 0.25
+  for (let i = 0; i < MARIA_BASINS.length; i++) {
+    const m = MARIA_BASINS[i]
+    const dot = THREE.MathUtils.clamp(unitVec.dot(m.vec), -1, 1)
+    if (dot < Math.cos(m.radiusRad * 1.4)) continue
+    const ang = Math.acos(dot)
+    const r = ang / m.radiusRad + noiseMod * 0.35
+    if (r < 1.15) {
+      const weight = 1 - THREE.MathUtils.smoothstep(r, 0.55, 1.15)
+      dark = Math.max(dark, weight * m.darkness)
+    }
+  }
+  return dark
+}
+
 function getSphericalElevationOffset(unitVec: THREE.Vector3, highDetail = false): number {
-  let h = fbm3D(unitVec.x, unitVec.y, unitVec.z, 4) * 0.011
-  h += fbm3D(unitVec.x * 9.0, unitVec.y * 9.0, unitVec.z * 9.0, 3) * 0.0028
+  let h = fbm3D(unitVec.x, unitVec.y, unitVec.z, 4) * 0.009
+  h += fbm3D(unitVec.x * 9.0, unitVec.y * 9.0, unitVec.z * 9.0, 3) * 0.0024
 
   if (highDetail) {
     const fine = fbm3D(unitVec.x * 38.0, unitVec.y * 38.0, unitVec.z * 38.0, 3)
     const micro = Math.abs(valueNoise3D(unitVec.x * 115.0, unitVec.y * 115.0, unitVec.z * 115.0) - 0.5)
-    h += fine * 0.0014 - micro * 0.00055
+    h += fine * 0.0012 - micro * 0.00045
   }
 
   for (let i = 0; i < CRATERS.length; i++) {
@@ -185,7 +226,7 @@ function getSphericalElevationOffset(unitVec: THREE.Vector3, highDetail = false)
       let bowl = (r * r - 1.0) * c.depth
       if (highDetail && c.depth > 0) {
         if (r > 0.52 && r < 0.96) {
-          bowl += Math.sin(r * Math.PI * 10.0) * 0.00045 * (1.0 - r)
+          bowl += Math.sin(r * Math.PI * 10.0) * 0.0004 * (1.0 - r)
         }
         if (c.radiusDeg > 1.35 && r < 0.28) {
           bowl += Math.cos((r / 0.28) * Math.PI * 0.5) * (c.depth * 0.22)
@@ -230,15 +271,17 @@ function enuMetersToSceneVec(
   xEastM: number,
   yUpM: number,
   zSouthM: number,
-  spanM: number,
+  dem: DecodedDemSiteTerrain,
   frame: { east: THREE.Vector3; north: THREE.Vector3; up: THREE.Vector3 },
   verticalScale: number,
 ): THREE.Vector3 {
-  const scaleXZ = (DEM_PATCH_HALF_EXTENT * 2) / Math.max(spanM, 1)
-  const baseR = MOON_RADIUS + 0.032
+  const scaleXZ = (DEM_PATCH_HALF_EXTENT * 2) / Math.max(dem.span, 1)
+  // Center vertical elevation around midpoint so deep valleys (-375m) stay cleanly above MOON_RADIUS
+  const midRelY = (dem.minRelY + dem.maxRelY) * 0.5
+  const baseR = MOON_RADIUS + 0.065
   const tangentX = xEastM * scaleXZ
   const tangentNorth = -zSouthM * scaleXZ
-  const radialShift = yUpM * scaleXZ * verticalScale
+  const radialShift = (yUpM - midRelY) * scaleXZ * verticalScale
 
   return frame.up
     .clone()
@@ -263,11 +306,11 @@ function enuDirectionToWorld(
 }
 
 function slopeColorRGB(slopeDeg: number): [number, number, number] {
-  if (!Number.isFinite(slopeDeg)) return [0.35, 0.4, 0.48]
+  if (!Number.isFinite(slopeDeg)) return [0.45, 0.5, 0.58]
   const band = classifySlopeBand(slopeDeg)
-  if (band === 'SAFE') return [0.20, 0.83, 0.60]
-  if (band === 'CAUTION') return [0.98, 0.75, 0.14]
-  return [0.98, 0.44, 0.52]
+  if (band === 'SAFE') return [0.22, 0.85, 0.62]
+  if (band === 'CAUTION') return [0.98, 0.76, 0.16]
+  return [0.98, 0.45, 0.54]
 }
 
 export function LunarStage3D({
@@ -284,6 +327,7 @@ export function LunarStage3D({
   overlayMode,
   showWireframe,
   verticalScale,
+  observerHeightM,
   onCameraModeChange,
   onPickPoint,
   onSelectCatalogSite,
@@ -302,6 +346,7 @@ export function LunarStage3D({
     overlayMode,
     showWireframe,
     verticalScale,
+    observerHeightM,
     onCameraModeChange,
     onPickPoint,
     onSelectCatalogSite,
@@ -318,6 +363,7 @@ export function LunarStage3D({
     overlayMode,
     showWireframe,
     verticalScale,
+    observerHeightM,
     onCameraModeChange,
     onPickPoint,
     onSelectCatalogSite,
@@ -330,7 +376,6 @@ export function LunarStage3D({
     updateMarkersAndLights: () => void
   } | null>(null)
 
-  // Initialize Three.js scene once.
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
@@ -339,8 +384,8 @@ export function LunarStage3D({
     const camera = new THREE.PerspectiveCamera(
       36,
       container.clientWidth / Math.max(container.clientHeight, 1),
-      0.015,
-      100,
+      0.012,
+      120,
     )
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
@@ -350,40 +395,48 @@ export function LunarStage3D({
 
     // Starfield
     const starGeo = new THREE.BufferGeometry()
-    const starCount = 460
+    const starCount = 520
     const starPos = new Float32Array(starCount * 3)
     for (let i = 0; i < starCount; i++) {
       const theta = Math.random() * Math.PI * 2
       const phi = Math.acos(2 * Math.random() - 1)
-      const r = 34 + Math.random() * 14
+      const r = 36 + Math.random() * 16
       starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta)
       starPos[i * 3 + 1] = r * Math.cos(phi)
       starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
     }
     starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
     const starMat = new THREE.PointsMaterial({
-      color: 0x94a3b8,
+      color: 0xa5b4fc,
       size: 0.055,
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.36,
     })
     const stars = new THREE.Points(starGeo, starMat)
     scene.add(stars)
 
-    // Lighting
-    const sunLight = new THREE.DirectionalLight(0xffffff, 2.0)
+    // Balanced studio + grazing lunar lighting (prevents pitch-black crater ink blotches)
+    const sunLight = new THREE.DirectionalLight(0xfffcf5, 1.55)
     sunLight.position.set(4.5, -0.35, 3.8)
     scene.add(sunLight)
 
-    const earthShineLight = new THREE.DirectionalLight(0x38bdf8, 0.16)
-    earthShineLight.position.set(0, 0.2, 5)
+    const earthShineLight = new THREE.DirectionalLight(0x38bdf8, 0.22)
+    earthShineLight.position.set(0, 0.3, 5)
     scene.add(earthShineLight)
 
-    const ambientLight = new THREE.AmbientLight(0x1e222d, 0.25)
+    const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1e293b, 0.45)
+    scene.add(hemiLight)
+
+    const ambientLight = new THREE.AmbientLight(0xd1d9e6, 0.42)
     scene.add(ambientLight)
 
-    // State 1 Mesh: Full Orbital Lunar Globe
-    const moonGeo = new THREE.IcosahedronGeometry(MOON_RADIUS, 6)
+    // STATE 1 MESH: Smooth Indexed High-Res Orbital Lunar Globe (~48k triangles welded cleanly)
+    const rawMoonGeo = new THREE.IcosahedronGeometry(MOON_RADIUS, 48)
+    rawMoonGeo.deleteAttribute('normal')
+    rawMoonGeo.deleteAttribute('uv')
+    const moonGeo = mergeVertices(rawMoonGeo, 1e-5)
+    rawMoonGeo.dispose()
+
     const posAttr = moonGeo.attributes.position
     const moonColors = new Float32Array(posAttr.count * 3)
     const vTemp = new THREE.Vector3()
@@ -394,31 +447,31 @@ export function LunarStage3D({
       vTemp.copy(unit).multiplyScalar(MOON_RADIUS + elev * 1.8)
       posAttr.setXYZ(i, vTemp.x, vTemp.y, vTemp.z)
 
-      const albedo = THREE.MathUtils.clamp(
-        0.46 + elev * 11.5 + fbm3D(unit.x * 3, unit.y * 3, unit.z * 3) * 0.12,
-        0.22,
-        0.78,
-      )
-      moonColors[i * 3] = albedo * 0.96
-      moonColors[i * 3 + 1] = albedo * 0.97
-      moonColors[i * 3 + 2] = albedo * 1.02
+      const mareDark = getLunarMareDarkening(unit)
+      const microRegolith = fbm3D(unit.x * 16, unit.y * 16, unit.z * 16, 3) * 0.08
+      const regolith = THREE.MathUtils.clamp(0.58 + elev * 9.5 + microRegolith - mareDark, 0.24, 0.84)
+      moonColors[i * 3] = regolith * 0.96
+      moonColors[i * 3 + 1] = regolith * 0.97
+      moonColors[i * 3 + 2] = regolith * 1.01
     }
     moonGeo.setAttribute('color', new THREE.BufferAttribute(moonColors, 3))
     moonGeo.computeVertexNormals()
     const moonMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.94,
-      metalness: 0.04,
+      roughness: 0.92,
+      metalness: 0.03,
+      transparent: true,
+      opacity: 1,
     })
     const moonMesh = new THREE.Mesh(moonGeo, moonMat)
     scene.add(moonMesh)
 
-    // Subtle Polar Graticule (fades out cleanly as camera zooms into Surface Terrain)
+    // Polar Coordinate Graticule
     const graticuleGroup = new THREE.Group()
-    const lineMatSubtle = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.07 })
+    const lineMatSubtle = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.065 })
     const lineMatPole = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.16 })
     const graticuleMats = [
-      { mat: lineMatSubtle, base: 0.07 },
+      { mat: lineMatSubtle, base: 0.065 },
       { mat: lineMatPole, base: 0.16 },
     ]
     const graticuleGeos: THREE.BufferGeometry[] = []
@@ -453,7 +506,7 @@ export function LunarStage3D({
     }
     scene.add(graticuleGroup)
 
-    // Catalog Site Orbital Beacons (4 Real NASA South Pole Sites)
+    // Catalog Site Orbital Beacons
     const beaconGroup = new THREE.Group()
     scene.add(beaconGroup)
     const beaconHitTargets: { mesh: THREE.Mesh; site: CatalogSiteEntry }[] = []
@@ -463,14 +516,14 @@ export function LunarStage3D({
 
     latestPropsRef.current.catalogSites.forEach(site => {
       const u = latLonToUnitVec(site.latitude_deg, site.longitude_deg)
-      const r = MOON_RADIUS + getSphericalElevationOffset(u, false) * 1.8 + 0.009
+      const r = MOON_RADIUS + getSphericalElevationOffset(u, false) * 1.8 + 0.01
       const pos = u.clone().multiplyScalar(r)
 
       const ringMat = new THREE.MeshBasicMaterial({
         color: site.hasVerifiedAnalysis ? 0x34d399 : 0x67e8f9,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.85,
+        opacity: 0.9,
       })
       const coreMat = new THREE.MeshBasicMaterial({
         color: site.hasVerifiedAnalysis ? 0x34d399 : 0x67e8f9,
@@ -486,7 +539,7 @@ export function LunarStage3D({
 
       const ringMesh = new THREE.Mesh(beaconRingGeo, ringMat)
       const coreMesh = new THREE.Mesh(beaconCoreGeo, coreMat)
-      coreMesh.scale.setScalar(2.4) // Slight invisible/core click tolerance
+      coreMesh.scale.setScalar(2.4)
       coreMesh.visible = false
       const visCore = new THREE.Mesh(beaconCoreGeo, coreMat)
 
@@ -495,7 +548,7 @@ export function LunarStage3D({
       beaconHitTargets.push({ mesh: coreMesh, site })
     })
 
-    // State 2A Mesh: Procedural High-Res Spherical Crater Patch (fallback outside DEM footprints)
+    // STATE 2A: High-Res Procedural Crater Patch (for arbitrary points outside the 4 NASA LOLA patches)
     const PATCH_SEGMENTS = 128
     const PATCH_ANGULAR_RADIUS = 0.125
     const procPatchGeo = new THREE.PlaneGeometry(1, 1, PATCH_SEGMENTS, PATCH_SEGMENTS)
@@ -505,7 +558,7 @@ export function LunarStage3D({
     )
     const procPatchMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.92,
+      roughness: 0.91,
       metalness: 0.03,
       transparent: true,
       opacity: 0,
@@ -555,9 +608,9 @@ export function LunarStage3D({
           const r = MOON_RADIUS + blended * 1.8 + 0.0006 * edgeBlend
           pAttr.setXYZ(idx, sampleUnit.x * r, sampleUnit.y * r, sampleUnit.z * r)
 
-          const microGrain = fbm3D(sampleUnit.x * 26, sampleUnit.y * 26, sampleUnit.z * 26, 2) * 0.09
-          const albedo = THREE.MathUtils.clamp(0.45 + blended * 12.8 + microGrain, 0.18, 0.84)
-          cAttr.setXYZ(idx, albedo * 0.96, albedo * 0.97, albedo * 1.02)
+          const microGrain = fbm3D(sampleUnit.x * 26, sampleUnit.y * 26, sampleUnit.z * 26, 2) * 0.08
+          const albedo = THREE.MathUtils.clamp(0.56 + blended * 10.5 + microGrain, 0.34, 0.86)
+          cAttr.setXYZ(idx, albedo * 0.96, albedo * 0.97, albedo * 1.01)
           idx++
         }
       }
@@ -567,12 +620,12 @@ export function LunarStage3D({
       procPatchGeo.computeBoundingSphere()
     }
 
-    // State 2B Mesh: Real NASA LOLA 129x129 Float32 Binary DEM Reconstruction
+    // STATE 2B: Real NASA LOLA 129x129 Float32 Binary DEM + Smooth Context Skirt
     const demGeo = new THREE.BufferGeometry()
     const demMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: 0.91,
-      metalness: 0.05,
+      roughness: 0.88,
+      metalness: 0.04,
       transparent: true,
       opacity: 0,
       wireframe: false,
@@ -582,7 +635,20 @@ export function LunarStage3D({
     demMesh.visible = false
     scene.add(demMesh)
 
-    // Footprint subtle border outline around the 2.56km x 2.56km LOLA DEM patch
+    // Smooth Outer Skirt bridging the 2.56km DEM perimeter to a soft dark polar floor (prevents floating card edge)
+    const demSkirtGeo = new THREE.BufferGeometry()
+    const demSkirtMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.94,
+      metalness: 0.02,
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    })
+    const demSkirtMesh = new THREE.Mesh(demSkirtGeo, demSkirtMat)
+    demSkirtMesh.visible = false
+    scene.add(demSkirtMesh)
+
     const demFrameGeo = new THREE.BufferGeometry()
     const demFrameMat = new THREE.LineBasicMaterial({
       color: 0x34d399,
@@ -596,11 +662,11 @@ export function LunarStage3D({
     // Safe Haven 3D markers on DEM
     const safeHavenGroup = new THREE.Group()
     scene.add(safeHavenGroup)
-    const safeRingGeo = new THREE.RingGeometry(0.008, 0.013, 24)
+    const safeRingGeo = new THREE.RingGeometry(0.0085, 0.0135, 24)
     const safeCoreGeo = new THREE.CircleGeometry(0.0045, 16)
     const safeHavenPool: { group: THREE.Group; ringMat: THREE.MeshBasicMaterial; coreMat: THREE.MeshBasicMaterial }[] = []
     for (let i = 0; i < 6; i++) {
-      const ringMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9, side: THREE.DoubleSide, transparent: true, opacity: 0.9 })
+      const ringMat = new THREE.MeshBasicMaterial({ color: 0x67e8f9, side: THREE.DoubleSide, transparent: true, opacity: 0.95 })
       const coreMat = new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide })
       const g = new THREE.Group()
       g.visible = false
@@ -609,32 +675,50 @@ export function LunarStage3D({
       safeHavenPool.push({ group: g, ringMat, coreMat })
     }
 
-    // Selected Reticle + Earth LoS Vector + Sun LoS Vector
+    // Physical Miniature Lander + Mast at the active observation point
+    const landerGroup = new THREE.Group()
+    landerGroup.visible = false
+    scene.add(landerGroup)
+    const landerBodyGeo = new THREE.CylinderGeometry(0.0042, 0.0062, 0.0048, 6)
+    const landerBodyMat = new THREE.MeshStandardMaterial({ color: 0xe6bf70, roughness: 0.45, metalness: 0.55 })
+    const landerBodyMesh = new THREE.Mesh(landerBodyGeo, landerBodyMat)
+    landerBodyMesh.position.y = 0.0036
+    const landerMastGeo = new THREE.CylinderGeometry(0.0006, 0.0006, 0.009, 6)
+    const landerMastMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.5 })
+    const landerMastMesh = new THREE.Mesh(landerMastGeo, landerMastMat)
+    landerMastMesh.position.y = 0.0095
+    const landerBeaconGeo = new THREE.SphereGeometry(0.0016, 10, 8)
+    const landerBeaconMat = new THREE.MeshBasicMaterial({ color: 0x34d399 })
+    const landerBeaconMesh = new THREE.Mesh(landerBeaconGeo, landerBeaconMat)
+    landerBeaconMesh.position.y = 0.0145
+    landerGroup.add(landerBodyMesh, landerMastMesh, landerBeaconMesh)
+
+    // Ground Reticle Ring + Earth & Sun 3D LoS Vectors
     const markerGroup = new THREE.Group()
     markerGroup.visible = false
     scene.add(markerGroup)
     const selRingMat = new THREE.MeshBasicMaterial({ color: 0x34d399, side: THREE.DoubleSide, transparent: true, opacity: 0.94 })
     const selDotMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-    const selRingMesh = new THREE.Mesh(new THREE.RingGeometry(0.015, 0.02, 36), selRingMat)
-    const selDotMesh = new THREE.Mesh(new THREE.CircleGeometry(0.005, 20), selDotMat)
+    const selRingMesh = new THREE.Mesh(new THREE.RingGeometry(0.014, 0.019, 36), selRingMat)
+    const selDotMesh = new THREE.Mesh(new THREE.CircleGeometry(0.0035, 16), selDotMat)
     markerGroup.add(selRingMesh, selDotMesh)
 
     const earthLosGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, 1)])
-    const earthLosMat = new THREE.LineBasicMaterial({ color: 0x34d399, transparent: true, opacity: 0.92 })
+    const earthLosMat = new THREE.LineBasicMaterial({ color: 0x34d399, transparent: true, opacity: 0.94 })
     const earthLosLine = new THREE.Line(earthLosGeo, earthLosMat)
     earthLosLine.visible = false
     scene.add(earthLosLine)
 
     const sunLosGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 1, 0)])
-    const sunLosMat = new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.85 })
+    const sunLosMat = new THREE.LineBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.9 })
     const sunLosLine = new THREE.Line(sunLosGeo, sunLosMat)
     sunLosLine.visible = false
     scene.add(sunLosLine)
 
     // Camera & Runtime Animation State
     const camState = {
-      radius: 7.4,
-      targetRadius: 7.4,
+      radius: 7.2,
+      targetRadius: 7.2,
       theta: 0.25,
       targetTheta: 0.25,
       phi: Math.PI * 0.78,
@@ -657,6 +741,7 @@ export function LunarStage3D({
       const { demTerrain: dem, overlayMode: mode, showWireframe: wire, verticalScale: vScale } = latestPropsRef.current
       if (!dem) {
         demMesh.visible = false
+        demSkirtMesh.visible = false
         demFrameLine.visible = false
         activeDemRenderedKey = ''
         return
@@ -678,7 +763,7 @@ export function LunarStage3D({
         const xEast = dem.positions[i * 3]
         const yUp = dem.positions[i * 3 + 1]
         const zSouth = dem.positions[i * 3 + 2]
-        const p = enuMetersToSceneVec(xEast, yUp, zSouth, dem.span, frame, vScale)
+        const p = enuMetersToSceneVec(xEast, yUp, zSouth, dem, frame, vScale)
         worldPositions[i * 3] = p.x
         worldPositions[i * 3 + 1] = p.y
         worldPositions[i * 3 + 2] = p.z
@@ -689,11 +774,12 @@ export function LunarStage3D({
           colors[i * 3 + 1] = g
           colors[i * 3 + 2] = b
         } else {
+          // Bright physical regolith albedo in highlands/ridge range (0.48 .. 0.84)
           const normH = THREE.MathUtils.clamp((yUp - dem.minRelY) / elevRange, 0, 1)
-          const albedo = 0.25 + normH * 0.52
+          const albedo = 0.48 + normH * 0.36
           colors[i * 3] = albedo * 0.96
           colors[i * 3 + 1] = albedo * 0.98
-          colors[i * 3 + 2] = albedo * 1.03
+          colors[i * 3 + 2] = albedo * 1.02
         }
       }
 
@@ -703,14 +789,74 @@ export function LunarStage3D({
       demGeo.computeVertexNormals()
       demGeo.computeBoundingSphere()
 
-      // Perimeter frame around DEM tile
-      const halfSpan = dem.span * 0.5
-      const framePts = [
-        enuMetersToSceneVec(-halfSpan, 0, -halfSpan, dem.span, frame, vScale),
-        enuMetersToSceneVec(halfSpan, 0, -halfSpan, dem.span, frame, vScale),
-        enuMetersToSceneVec(halfSpan, 0, halfSpan, dem.span, frame, vScale),
-        enuMetersToSceneVec(-halfSpan, 0, halfSpan, dem.span, frame, vScale),
+      // Build seamless context skirt perimeter extending smoothly out 1.9x from DEM border
+      const w = dem.metadata.width
+      const h = dem.metadata.height
+      const ringSamples = (w - 1) * 4
+      const ringPositions = new Float32Array(ringSamples * 2 * 3)
+      const ringColors = new Float32Array(ringSamples * 2 * 3)
+      const ringIndices: number[] = []
+      const ringCoords: [number, number][] = []
+      for (let c = 0; c < w - 1; c++) ringCoords.push([0, c])
+      for (let r = 0; r < h - 1; r++) ringCoords.push([r, w - 1])
+      for (let c = w - 1; c > 0; c--) ringCoords.push([h - 1, c])
+      for (let r = h - 1; r > 0; r--) ringCoords.push([r, 0])
+
+      const midRelY = (dem.minRelY + dem.maxRelY) * 0.5
+      ringCoords.forEach(([row, col], idx) => {
+        const i = row * w + col
+        const xE = dem.positions[i * 3]
+        const yU = dem.positions[i * 3 + 1]
+        const zS = dem.positions[i * 3 + 2]
+        const innerPt = enuMetersToSceneVec(xE, yU, zS, dem, frame, vScale)
+        const outerPt = enuMetersToSceneVec(xE * 2.4, midRelY - 120, zS * 2.4, dem, frame, vScale)
+
+        ringPositions[idx * 6 + 0] = innerPt.x
+        ringPositions[idx * 6 + 1] = innerPt.y
+        ringPositions[idx * 6 + 2] = innerPt.z
+        ringPositions[idx * 6 + 3] = outerPt.x
+        ringPositions[idx * 6 + 4] = outerPt.y
+        ringPositions[idx * 6 + 5] = outerPt.z
+
+        // Inner skirt color blends seamlessly with border vertex, fading softly toward outer void
+        ringColors[idx * 6 + 0] = colors[i * 3] * 0.9
+        ringColors[idx * 6 + 1] = colors[i * 3 + 1] * 0.9
+        ringColors[idx * 6 + 2] = colors[i * 3 + 2] * 0.9
+        ringColors[idx * 6 + 3] = 0.03
+        ringColors[idx * 6 + 4] = 0.035
+        ringColors[idx * 6 + 5] = 0.045
+
+        const nextIdx = (idx + 1) % ringCoords.length
+        const a = idx * 2
+        const b = idx * 2 + 1
+        const c2 = nextIdx * 2
+        const d = nextIdx * 2 + 1
+        ringIndices.push(a, b, c2, c2, b, d)
+      })
+      demSkirtGeo.setAttribute('position', new THREE.BufferAttribute(ringPositions, 3))
+      demSkirtGeo.setAttribute('color', new THREE.BufferAttribute(ringColors, 3))
+      demSkirtGeo.setIndex(ringIndices)
+      demSkirtGeo.computeVertexNormals()
+      demSkirtGeo.computeBoundingSphere()
+
+      // Perimeter outline frame around exact 2.56km DEM corners
+      const cornerCoords = [
+        [0, 0],
+        [0, w - 1],
+        [h - 1, w - 1],
+        [h - 1, 0],
       ]
+      const framePts = cornerCoords.map(([r, c]) => {
+        const idx = r * w + c
+        return enuMetersToSceneVec(
+          dem.positions[idx * 3],
+          dem.positions[idx * 3 + 1],
+          dem.positions[idx * 3 + 2],
+          dem,
+          frame,
+          vScale,
+        ).addScaledVector(frame.up, 0.002)
+      })
       demFrameGeo.setFromPoints(framePts)
     }
 
@@ -723,6 +869,7 @@ export function LunarStage3D({
         recommendations: recDoc,
         highlightedCandidateId: highlightId,
         verticalScale: vScale,
+        observerHeightM: mastM,
       } = latestPropsRef.current
 
       beaconHitTargets.forEach(entry => {
@@ -732,10 +879,10 @@ export function LunarStage3D({
 
       const frame = getLocalTangentFrame(selectedUnit)
 
-      // Update Sun & Earth lighting + LoS vectors
+      // Update Sun DirectionalLight: preserve real azimuth while elevating visual lighting >= 18 deg so slopes show crisp relief
       if (activeSel && sample) {
         const sunAz = ((sample.sun.azimuth_deg % 360) + 360) % 360
-        const sunElVisual = Math.max(sample.sun.elevation_deg, 1.0)
+        const sunElVisual = Math.max(sample.sun.elevation_deg, 18.0)
         const sunDirWorld = enuDirectionToWorld(sunAz, sunElVisual, frame)
         sunLight.position.copy(sunDirWorld).multiplyScalar(8.0)
 
@@ -747,9 +894,9 @@ export function LunarStage3D({
         earthShineLight.position.set(0, 0.2, 5)
       }
 
-      // Position Reticle & Beams
       if (!activeSel) {
         markerGroup.visible = false
+        landerGroup.visible = false
         earthLosLine.visible = false
         sunLosLine.visible = false
         safeHavenPool.forEach(p => (p.group.visible = false))
@@ -767,24 +914,24 @@ export function LunarStage3D({
           const eastM = Math.sin(bRad) * cand.distance_m
           const southM = -Math.cos(bRad) * cand.distance_m
           const yRel = cand.coordinates.elevation_m - dem.metadata.coordinates.elevation_m
-          originWorld = enuMetersToSceneVec(eastM, yRel, southM, dem.span, demFrame, vScale).addScaledVector(
+          originWorld = enuMetersToSceneVec(eastM, yRel, southM, dem, demFrame, vScale).addScaledVector(
             demFrame.up,
-            0.004,
+            0.0025,
           )
         } else if (clickedDemEnu && clickedDemEnu.siteId === dem.siteId) {
           originWorld = enuMetersToSceneVec(
             clickedDemEnu.eastM,
             clickedDemEnu.yRel,
             clickedDemEnu.southM,
-            dem.span,
+            dem,
             demFrame,
             vScale,
-          ).addScaledVector(demFrame.up, 0.004)
+          ).addScaledVector(demFrame.up, 0.0025)
         } else {
           const yRel = dem.groundY ?? 0
-          originWorld = enuMetersToSceneVec(0, yRel, 0, dem.span, demFrame, vScale).addScaledVector(
+          originWorld = enuMetersToSceneVec(0, yRel, 0, dem, demFrame, vScale).addScaledVector(
             demFrame.up,
-            0.004,
+            0.0025,
           )
         }
       } else {
@@ -796,28 +943,37 @@ export function LunarStage3D({
       markerGroup.position.copy(originWorld)
       markerGroup.lookAt(originWorld.clone().add(frame.up))
 
-      // Earth LoS Line
+      // Position Physical Lander + Mast when zoomed near surface
+      landerGroup.visible = camState.alpha > 0.35
+      landerGroup.position.copy(originWorld)
+      landerGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), frame.up)
+      landerMastMesh.scale.y = mastM === 5 ? 1.65 : 1.0
+      landerBeaconMesh.position.y = mastM === 5 ? 0.0175 : 0.0145
+
+      const sensorOrigin = originWorld.clone().addScaledVector(frame.up, mastM === 5 ? 0.0175 : 0.0145)
+
+      // Exact Scientific Earth & Sun Line-of-Sight Vectors
       if (sample) {
         const earthAz = ((sample.earth.azimuth_deg % 360) + 360) % 360
         const earthVec = enuDirectionToWorld(earthAz, sample.earth.elevation_deg, frame)
         const earthIn = sample.earth.visible === true
         const earthLen = earthIn ? 0.55 : 0.16
-        earthLosGeo.setFromPoints([originWorld, originWorld.clone().addScaledVector(earthVec, earthLen)])
+        earthLosGeo.setFromPoints([sensorOrigin, sensorOrigin.clone().addScaledVector(earthVec, earthLen)])
         earthLosMat.color.setHex(earthIn ? 0x34d399 : 0xfb7185)
         selRingMat.color.setHex(earthIn ? 0x34d399 : 0xfb7185)
+        landerBeaconMat.color.setHex(earthIn ? 0x34d399 : 0xfb7185)
         earthLosLine.visible = true
 
-        // Sun LoS Line
         const sunAz = ((sample.sun.azimuth_deg % 360) + 360) % 360
         const sunVec = enuDirectionToWorld(sunAz, sample.sun.elevation_deg, frame)
         const sunIn = sample.sun.visible === true
-        const sunLen = sunIn ? 0.45 : 0.14
-        sunLosGeo.setFromPoints([originWorld, originWorld.clone().addScaledVector(sunVec, sunLen)])
+        const sunLen = sunIn ? 0.48 : 0.14
+        sunLosGeo.setFromPoints([sensorOrigin, sensorOrigin.clone().addScaledVector(sunVec, sunLen)])
         sunLosMat.color.setHex(sunIn ? 0xfbbf24 : 0x64748b)
         sunLosLine.visible = true
       }
 
-      // Render Safe Haven 3D pins onto real DEM
+      // Render Safe Haven 3D divert markers onto real DEM
       if (dem && recDoc?.candidates.length && camState.alpha > 0.25) {
         const demFrame = getLocalTangentFrame(
           latLonToUnitVec(dem.metadata.coordinates.latitude_deg, dem.metadata.coordinates.longitude_deg),
@@ -832,7 +988,7 @@ export function LunarStage3D({
           const eastM = Math.sin(bRad) * cand.distance_m
           const southM = -Math.cos(bRad) * cand.distance_m
           const yRel = cand.coordinates.elevation_m - dem.metadata.coordinates.elevation_m
-          const pos = enuMetersToSceneVec(eastM, yRel, southM, dem.span, demFrame, vScale).addScaledVector(
+          const pos = enuMetersToSceneVec(eastM, yRel, southM, dem, demFrame, vScale).addScaledVector(
             demFrame.up,
             0.004,
           )
@@ -857,7 +1013,7 @@ export function LunarStage3D({
         clickedDemEnu = null
         camState.targetPhi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(u.y, -1, 1)), 0.14, Math.PI - 0.04)
         camState.targetTheta = Math.atan2(u.x, u.z)
-        camState.targetRadius = surfaceMode ? 2.58 : 6.4
+        camState.targetRadius = surfaceMode ? 2.66 : 6.4
         rebuildProceduralPatch(focusUnit)
         rebuildDemMesh()
         updateMarkersAndLights()
@@ -870,9 +1026,9 @@ export function LunarStage3D({
             Math.PI - 0.04,
           )
           camState.targetTheta = Math.atan2(selectedUnit.x, selectedUnit.z)
-          camState.targetRadius = 2.58
+          camState.targetRadius = 2.66
         } else {
-          camState.targetRadius = 7.4
+          camState.targetRadius = 7.2
           camState.targetPhi = Math.PI * 0.78
         }
       },
@@ -880,7 +1036,7 @@ export function LunarStage3D({
       updateMarkersAndLights,
     }
 
-    // Pointer / Raycasting / Zoom Listeners
+    // Raycasting & Orbit Controls
     const raycaster = new THREE.Raycaster()
     const pointerNdc = new THREE.Vector2()
 
@@ -890,7 +1046,6 @@ export function LunarStage3D({
       pointerNdc.y = -((clientY - rect.top) / rect.height) * 2 + 1
       raycaster.setFromCamera(pointerNdc, camera)
 
-      // First check clickable South Pole catalog site beacons when visible
       const beaconHits = raycaster.intersectObjects(
         beaconHitTargets.map(b => b.mesh),
         false,
@@ -904,7 +1059,6 @@ export function LunarStage3D({
         }
       }
 
-      // Check real DEM or procedural surface or sphere
       const { demTerrain: dem, catalogSites: sites } = latestPropsRef.current
       if (dem && demMesh.visible && camState.alpha > 0.35) {
         const demHits = raycaster.intersectObject(demMesh, false)
@@ -915,7 +1069,7 @@ export function LunarStage3D({
             dem.metadata.coordinates.longitude_deg,
           )
           const demFrame = getLocalTangentFrame(demCenter)
-          const basePos = demFrame.up.clone().multiplyScalar(MOON_RADIUS + 0.032)
+          const basePos = demFrame.up.clone().multiplyScalar(MOON_RADIUS + 0.065)
           const delta = hitPt.clone().sub(basePos)
           const scaleXZ = (DEM_PATCH_HALF_EXTENT * 2) / Math.max(dem.span, 1)
           const eastM = delta.dot(demFrame.east) / scaleXZ
@@ -934,10 +1088,9 @@ export function LunarStage3D({
             const s = dem.slopeDegPerVertex[idx]
             slopeDeg = Number.isFinite(s) ? s : null
           }
-          // Approximate local lat/lon offset around DEM origin using lunar mean sphere radius
-          const latDelta = (northM / EARTH_RAD_APPROX) / DEG_TO_RAD
+          const latDelta = (northM / LUNAR_RADIUS_M) / DEG_TO_RAD
           const cosLat = Math.max(Math.cos(dem.metadata.coordinates.latitude_deg * DEG_TO_RAD), 0.015)
-          const lonDelta = (eastM / (EARTH_RAD_APPROX * cosLat)) / DEG_TO_RAD
+          const lonDelta = (eastM / (LUNAR_RADIUS_M * cosLat)) / DEG_TO_RAD
           const clickLat = THREE.MathUtils.clamp(dem.metadata.coordinates.latitude_deg + latDelta, -90, 90)
           const clickLon = normalizeLongitudeDeg(dem.metadata.coordinates.longitude_deg + lonDelta)
           selectedUnit.copy(hitPt).normalize()
@@ -963,7 +1116,6 @@ export function LunarStage3D({
       if (hits.length > 0) {
         const hitUnit = hits[0].point.clone().normalize()
         const { lat, lon } = unitVecToLatLon(hitUnit)
-        // Check proximity (< 0.4 deg) to any catalog site
         let matched: CatalogSiteEntry | null = null
         let bestDot = Math.cos(THREE.MathUtils.degToRad(0.45))
         for (const site of sites) {
@@ -1032,7 +1184,7 @@ export function LunarStage3D({
       e.preventDefault()
       const closeness = THREE.MathUtils.clamp((camState.targetRadius - 2.15) / 5.0, 0.22, 1.2)
       const zoomFactor = 1 + e.deltaY * 0.00105 * closeness
-      camState.targetRadius = THREE.MathUtils.clamp(camState.targetRadius * zoomFactor, 2.26, 11.2)
+      camState.targetRadius = THREE.MathUtils.clamp(camState.targetRadius * zoomFactor, 2.34, 11.2)
     }
 
     let initialPinchDist: number | null = null
@@ -1053,7 +1205,7 @@ export function LunarStage3D({
           e.touches[0].clientY - e.touches[1].clientY,
         )
         const scale = initialPinchDist / Math.max(dist, 1)
-        camState.targetRadius = THREE.MathUtils.clamp(initialPinchRadius * scale, 2.26, 11.2)
+        camState.targetRadius = THREE.MathUtils.clamp(initialPinchRadius * scale, 2.34, 11.2)
       }
     }
     const onTouchEnd = () => {
@@ -1093,7 +1245,7 @@ export function LunarStage3D({
       camState.theta += (camState.targetTheta - camState.theta) * 0.085
       camState.phi += (camState.targetPhi - camState.phi) * 0.085
 
-      const rawAlpha = THREE.MathUtils.clamp((3.65 - camState.radius) / 0.7, 0, 1)
+      const rawAlpha = THREE.MathUtils.clamp((3.7 - camState.radius) / 0.72, 0, 1)
       const alpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
       camState.alpha = alpha
 
@@ -1119,37 +1271,50 @@ export function LunarStage3D({
         rebuildDemMesh()
         demMesh.visible = true
         demMat.opacity = alpha
+        demSkirtMesh.visible = true
+        demSkirtMat.opacity = alpha * 0.92
         demFrameLine.visible = true
-        demFrameMat.opacity = alpha * 0.38
+        demFrameMat.opacity = alpha * 0.42
         procPatchMesh.visible = false
+
+        // Smoothly fade macro sphere out in surface view so zero sphere facets ever clip DEM valleys
+        const moonFade = 1 - THREE.MathUtils.smoothstep(alpha, 0.45, 0.88)
+        moonMat.opacity = moonFade
+        moonMesh.visible = moonFade > 0.02
       } else if (alpha > 0.005) {
         procPatchMesh.visible = true
         procPatchMat.opacity = alpha
         demMesh.visible = false
+        demSkirtMesh.visible = false
         demFrameLine.visible = false
+        moonMat.opacity = 1
+        moonMesh.visible = true
       } else {
         procPatchMesh.visible = false
         demMesh.visible = false
+        demSkirtMesh.visible = false
         demFrameLine.visible = false
+        moonMat.opacity = 1
+        moonMesh.visible = true
       }
 
       graticuleMats.forEach(g => {
-        g.mat.opacity = g.base * (1 - alpha * 0.88)
+        g.mat.opacity = g.base * (1 - alpha * 0.92)
       })
-      beaconGroup.visible = alpha < 0.75
+      beaconGroup.visible = alpha < 0.72
 
       camera.position.copy(gazeUnit).multiplyScalar(camState.radius)
 
       const targetUnit = activeSel ? selectedUnit : gazeUnit
       const targetBaseR = useRealDem
-        ? MOON_RADIUS + 0.032
+        ? MOON_RADIUS + 0.065
         : MOON_RADIUS + getSphericalElevationOffset(targetUnit, true) * 1.8
       desiredLookAt.copy(targetUnit).multiplyScalar(targetBaseR)
 
-      const closeObliqueFactor = THREE.MathUtils.clamp((3.0 - camState.radius) / 0.75, 0, 1) * alpha
+      const closeObliqueFactor = THREE.MathUtils.clamp((3.1 - camState.radius) / 0.75, 0, 1) * alpha
       if (closeObliqueFactor > 0.001) {
         const { north } = getLocalTangentFrame(gazeUnit)
-        camera.position.addScaledVector(north, -0.14 * closeObliqueFactor)
+        camera.position.addScaledVector(north, -0.15 * closeObliqueFactor)
       }
 
       camState.lookAtCurrent.lerpVectors(zeroVec, desiredLookAt, alpha)
@@ -1190,6 +1355,8 @@ export function LunarStage3D({
       procPatchMat.dispose()
       demGeo.dispose()
       demMat.dispose()
+      demSkirtGeo.dispose()
+      demSkirtMat.dispose()
       demFrameGeo.dispose()
       demFrameMat.dispose()
       safeRingGeo.dispose()
@@ -1198,6 +1365,12 @@ export function LunarStage3D({
         s.ringMat.dispose()
         s.coreMat.dispose()
       })
+      landerBodyGeo.dispose()
+      landerBodyMat.dispose()
+      landerMastGeo.dispose()
+      landerMastMat.dispose()
+      landerBeaconGeo.dispose()
+      landerBeaconMat.dispose()
       selRingMat.dispose()
       selDotMat.dispose()
       earthLosGeo.dispose()
@@ -1211,7 +1384,6 @@ export function LunarStage3D({
     }
   }, [])
 
-  // Sync programmatic navigation & DEM / timeline updates without recreating WebGL context.
   useEffect(() => {
     if (!focusCoordinates) return
     cameraControlsRef.current?.jumpToTarget(
@@ -1228,7 +1400,17 @@ export function LunarStage3D({
   useEffect(() => {
     cameraControlsRef.current?.rebuildDemMesh()
     cameraControlsRef.current?.updateMarkersAndLights()
-  }, [demTerrain, overlayMode, showWireframe, verticalScale, currentSample, recommendations, highlightedCandidateId, hasSelection])
+  }, [
+    demTerrain,
+    overlayMode,
+    showWireframe,
+    verticalScale,
+    observerHeightM,
+    currentSample,
+    recommendations,
+    highlightedCandidateId,
+    hasSelection,
+  ])
 
   return (
     <div
