@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "0.1.0",
+    "sources": [
+      {
+        "id": "NASA_LOLA_80MPP",
+        "uri": "https://pgda.gsfc.nasa.gov/products/90",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "assumptions": [
+      "Touchdown slope limit <= 8.0 deg per Artemis HLS / CLPS stability envelope.",
+      "Candidates ranked by low slope, local topographic prominence, and divert proximity."
+    ]
+  },
+  "origin_site_id": "site04_shackleton_rim",
+  "search_radius_m": 2250.0,
+  "candidates": [
+    {
+      "site_id": "site04_shackleton_rim_safe_haven_1",
+      "coordinates": {
+        "latitude_deg": -89.86665,
+        "longitude_deg": -32.00095,
+        "elevation_m": 1565.7,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 2179.29,
+      "bearing_deg": 259.51,
+      "slope_deg": 1.24,
+      "sunlight_fraction_delta": 0.352
+    },
+    {
+      "site_id": "site04_shackleton_rim_safe_haven_2",
+      "coordinates": {
+        "latitude_deg": -89.90219,
+        "longitude_deg": -36.06576,
+        "elevation_m": 1501.7,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 1857.89,
+      "bearing_deg": 289.98,
+      "slope_deg": 1.36,
+      "sunlight_fraction_delta": 0.33
+    },
+    {
+      "site_id": "site04_shackleton_rim_safe_haven_3",
+      "coordinates": {
+        "latitude_deg": -89.93826,
+        "longitude_deg": -39.48304,
+        "elevation_m": 1427.9,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 1984.13,
+      "bearing_deg": 323.13,
+      "slope_deg": 2.47,
+      "sunlight_fraction_delta": 0.304
+    }
+  ]
+}

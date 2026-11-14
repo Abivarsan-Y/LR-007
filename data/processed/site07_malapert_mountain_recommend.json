@@ -1,0 +1,64 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "cached_real",
+    "model_version": "0.1.0",
+    "sources": [
+      {
+        "id": "NASA_LOLA_80MPP",
+        "uri": "https://pgda.gsfc.nasa.gov/products/90",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    ],
+    "assumptions": [
+      "Touchdown slope limit <= 8.0 deg per Artemis HLS / CLPS stability envelope.",
+      "Candidates ranked by low slope, local topographic prominence, and divert proximity."
+    ]
+  },
+  "origin_site_id": "site07_malapert_mountain",
+  "search_radius_m": 2250.0,
+  "candidates": [
+    {
+      "site_id": "site07_malapert_mountain_safe_haven_1",
+      "coordinates": {
+        "latitude_deg": -86.02122,
+        "longitude_deg": 1.93312,
+        "elevation_m": -2823.6,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 1709.58,
+      "bearing_deg": 248.2,
+      "slope_deg": 0.52,
+      "sunlight_fraction_delta": 0.035
+    },
+    {
+      "site_id": "site07_malapert_mountain_safe_haven_2",
+      "coordinates": {
+        "latitude_deg": -86.00641,
+        "longitude_deg": 2.56453,
+        "elevation_m": -2837.4,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 1058.86,
+      "bearing_deg": 192.99,
+      "slope_deg": 1.48,
+      "sunlight_fraction_delta": 0.031
+    },
+    {
+      "site_id": "site07_malapert_mountain_safe_haven_3",
+      "coordinates": {
+        "latitude_deg": -85.97246,
+        "longitude_deg": 2.54289,
+        "elevation_m": -2779.6,
+        "frame": "MOON_ME_DE421",
+        "reference_radius_m": 1737400
+      },
+      "distance_m": 2077.18,
+      "bearing_deg": 186.58,
+      "slope_deg": 2.42,
+      "sunlight_fraction_delta": 0.051
+    }
+  ]
+}
