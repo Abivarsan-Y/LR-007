@@ -1,0 +1,46 @@
+[
+  {
+    "site_id": "site01_connecting_ridge",
+    "name": "Connecting Ridge (Site 01)",
+    "latitude_deg": -89.44,
+    "longitude_deg": 222.0,
+    "elevation_m": 1850.0,
+    "region": "Connecting Ridge / de Gerlache Corridor",
+    "description": "High-altitude ridge connecting Shackleton and de Gerlache craters. High solar illumination (~80%) and candidate area for Artemis III.",
+    "recommended_mast_m": 2.0,
+    "terrain_file": "data/processed/site01_connecting_ridge.json"
+  },
+  {
+    "site_id": "site04_shackleton_rim",
+    "name": "Shackleton Crater Rim (Site 04)",
+    "latitude_deg": -89.90,
+    "longitude_deg": 0.0,
+    "elevation_m": 1250.0,
+    "region": "Shackleton Crater",
+    "description": "Classic peak of near-permanent light candidate at 89.9°S. High solar exposure with severe Earth libration horizon dips.",
+    "recommended_mast_m": 5.0,
+    "terrain_file": "data/processed/site04_shackleton_rim.json"
+  },
+  {
+    "site_id": "site07_malapert_mountain",
+    "name": "Malapert Mountain (Site 07)",
+    "latitude_deg": -86.04,
+    "longitude_deg": 2.70,
+    "elevation_m": 5050.0,
+    "region": "Malapert Massif",
+    "description": "Massive 5 km elevated mountain providing nearly uninterrupted direct-to-Earth line of sight and wide regional communications coverage.",
+    "recommended_mast_m": 2.0,
+    "terrain_file": "data/processed/site07_malapert_mountain.json"
+  },
+  {
+    "site_id": "site09_haworth_floor",
+    "name": "Haworth Crater Interior (Site 09)",
+    "latitude_deg": -87.40,
+    "longitude_deg": 355.20,
+    "elevation_m": -1450.0,
+    "region": "Haworth Crater",
+    "description": "Deep cryogenic Permanent Shadow Region (PSR) benchmark. 0% sunlight, steep wall approach hazards, and cold cryogenic regolith.",
+    "recommended_mast_m": 2.0,
+    "terrain_file": "data/processed/site09_haworth_floor.json"
+  }
+]

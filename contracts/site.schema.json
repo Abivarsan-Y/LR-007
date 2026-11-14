@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LunarSiteDefinition",
+  "description": "Metadata specification for curated lunar candidate landing sites.",
+  "type": "object",
+  "required": [
+    "site_id",
+    "name",
+    "latitude_deg",
+    "longitude_deg",
+    "elevation_m",
+    "region",
+    "description"
+  ],
+  "properties": {
+    "site_id": { "type": "string" },
+    "name": { "type": "string" },
+    "latitude_deg": { "type": "number", "minimum": -90.0, "maximum": 0.0 },
+    "longitude_deg": { "type": "number", "minimum": 0.0, "maximum": 360.0 },
+    "elevation_m": { "type": "number" },
+    "region": { "type": "string" },
+    "description": { "type": "string" },
+    "recommended_mast_m": { "type": "number", "default": 2.0 },
+    "terrain_file": { "type": "string" }
+  }
+}

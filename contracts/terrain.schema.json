@@ -1,0 +1,66 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TerrainHeightGrid",
+  "description": "Compact 3D terrain height-grid contract delivered by Person B to Member D for Three.js rendering.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "site_id",
+    "name",
+    "coordinates",
+    "grid",
+    "observer",
+    "heights"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0"]
+    },
+    "site_id": {
+      "type": "string",
+      "description": "Unique identifier for the lunar landing site"
+    },
+    "name": {
+      "type": "string",
+      "description": "Human-readable site name"
+    },
+    "coordinates": {
+      "type": "object",
+      "required": ["lat_deg", "lon_deg", "elevation_m"],
+      "properties": {
+        "lat_deg": { "type": "number", "minimum": -90.0, "maximum": 0.0 },
+        "lon_deg": { "type": "number", "minimum": 0.0, "maximum": 360.0 },
+        "elevation_m": { "type": "number" }
+      }
+    },
+    "grid": {
+      "type": "object",
+      "required": ["cols", "rows", "physical_width_m", "physical_height_m", "step_m", "min_elevation_m", "max_elevation_m"],
+      "properties": {
+        "cols": { "type": "integer", "minimum": 16 },
+        "rows": { "type": "integer", "minimum": 16 },
+        "physical_width_m": { "type": "number", "positive": true },
+        "physical_height_m": { "type": "number", "positive": true },
+        "step_m": { "type": "number", "positive": true },
+        "min_elevation_m": { "type": "number" },
+        "max_elevation_m": { "type": "number" }
+      }
+    },
+    "observer": {
+      "type": "object",
+      "required": ["grid_x", "grid_y", "deck_height_m", "mast_height_m"],
+      "properties": {
+        "grid_x": { "type": "integer" },
+        "grid_y": { "type": "integer" },
+        "deck_height_m": { "type": "number", "default": 2.0 },
+        "mast_height_m": { "type": "number", "default": 5.0 }
+      }
+    },
+    "heights": {
+      "type": "array",
+      "description": "Row-major flat 1D array of absolute elevations in meters (length = cols * rows)",
+      "items": { "type": "number" }
+    }
+  }
+}
