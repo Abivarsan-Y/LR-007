@@ -76,3 +76,11 @@ Geometry and OrbitControls are disposed when their inputs/view unmount. Pending 
 - Timeline changes MET/UTC and supplied Sun elevation together; manual Sun angles change the gold arrow/light.
 - No real science or safety badge is inferred from rendering.
 - In a narrow window, the controls stack below the viewport and remain usable.
+
+## Integrated C dashboard
+
+The main app now embeds this scene through `frontend/src/features/map/LunarViewport.tsx`. From the repo root use `npm --prefix frontend ci` then `npm --prefix frontend run dev`. The standalone preview command above remains available for isolated D development.
+
+`SceneView.dataKind` additionally accepts `unverified`, for terrain lacking a verified frame/reference. Such views force celestial overlays off and use neutral lighting regardless of `showCelestial`. The optional `showCelestial` prop can hide markers for other modes too. Scientific provenance labels in shared contracts remain unchanged; `unverified` is a display-only status.
+
+`terrain-json.mjs` adapts B's v1 inline-height JSON for inspection without changing his exporter or source metadata. Its returned diagnostics preserve both nominal site elevation and sampled observer elevation. This is separate from the binary loader and does not certify local ENU orientation. Celestial overlays are withheld until A/B agree on a verified observer and frame.
