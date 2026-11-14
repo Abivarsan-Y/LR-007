@@ -1,0 +1,13 @@
+{
+  "sites": [
+    { "id": "connecting-ridge", "name": "Connecting Ridge" },
+    { "id": "shackleton", "name": "Shackleton" },
+    { "id": "malapert", "name": "Malapert" },
+    { "id": "haworth", "name": "Haworth" }
+  ],
+  "defaults": {
+    "siteId": "connecting-ridge",
+    "startDateUtc": "2026-11-14",
+    "observerHeightM": 2
+  }
+}
