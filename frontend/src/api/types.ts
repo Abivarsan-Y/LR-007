@@ -8,6 +8,8 @@ export interface MissionSetup {
   siteId: string
   startDateUtc: string
   observerHeightM: number
+  durationDays: number
+  delayHours: 0 | 24 | 48
 }
 
 export interface DashboardPreview {

@@ -4,6 +4,7 @@ import type { DashboardPreview } from './types'
 
 const preview: DashboardPreview = {
   ...setup,
+  defaults: { ...setup.defaults, delayHours: 48 },
   source: 'synthetic',
   metrics: {
     sunlightPercent: analysis.metrics.sunlight_fraction * 100,
