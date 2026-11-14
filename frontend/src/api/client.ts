@@ -35,7 +35,7 @@ const DEFAULT_RECOMMEND_RADIUS_M = 1152.0
 const RAD_TO_DEG = 180 / Math.PI
 
 export function normalizeLongitudeDeg(lonDeg: number): number {
-  return ((lonDeg + 180) % 360 + 360) % 360 - 180
+  return ((((lonDeg + 180) % 360) + 360) % 360) - 180
 }
 
 export function classifySlopeBand(slopeDeg: number | null): SlopeBand {
@@ -56,7 +56,13 @@ export function formatLatLonCompact(lat: number, lon: number): string {
 
 const SITE_UI_OVERRIDES: Record<
   string,
-  { scienceSiteId: string | null; polarId: string; shortName: string; tag: string; hasVerifiedAnalysis: boolean }
+  {
+    scienceSiteId: string | null
+    polarId: string
+    shortName: string
+    tag: string
+    hasVerifiedAnalysis: boolean
+  }
 > = {
   site01_connecting_ridge: {
     scienceSiteId: 'nasa-site01-observation',
@@ -88,7 +94,7 @@ const SITE_UI_OVERRIDES: Record<
   },
 }
 
-export const CATALOG_SITES: CatalogSiteEntry[] = sitesCatalogJson.map(raw => {
+export const CATALOG_SITES: CatalogSiteEntry[] = sitesCatalogJson.map((raw) => {
   const override = SITE_UI_OVERRIDES[raw.site_id]
   return {
     id: raw.site_id,
@@ -110,11 +116,21 @@ export const CATALOG_SITES: CatalogSiteEntry[] = sitesCatalogJson.map(raw => {
 })
 
 export const POLAR_LANDMARKS = [
-  { name: 'Shackleton Floor', lat: -89.68, lon: 185.0, tag: 'Cryogenic Crater Floor' },
-  { name: 'Cabeus Basin', lat: -84.90, lon: -38.0, tag: 'LCROSS Impact Region' },
-  { name: 'Shoemaker Crater', lat: -88.10, lon: 45.0, tag: 'PSR Crater Floor' },
-  { name: 'de Gerlache Rim', lat: -88.40, lon: -88.0, tag: 'Ridge Crest' },
-  { name: 'South Pole Exact', lat: -90.00, lon: 0.0, tag: '90°S Rotational Axis' },
+  {
+    name: 'Shackleton Floor',
+    lat: -89.68,
+    lon: 185.0,
+    tag: 'Cryogenic Crater Floor',
+  },
+  { name: 'Cabeus Basin', lat: -84.9, lon: -38.0, tag: 'LCROSS Impact Region' },
+  { name: 'Shoemaker Crater', lat: -88.1, lon: 45.0, tag: 'PSR Crater Floor' },
+  { name: 'de Gerlache Rim', lat: -88.4, lon: -88.0, tag: 'Ridge Crest' },
+  {
+    name: 'South Pole Exact',
+    lat: -90.0,
+    lon: 0.0,
+    tag: '90°S Rotational Axis',
+  },
 ]
 
 interface ProcessedSiteLoaders {
@@ -134,28 +150,62 @@ interface ProcessedSiteLoaders {
 
 const PROCESSED_ASSET_LOADERS: Record<string, ProcessedSiteLoaders> = {
   site01_connecting_ridge: {
-    loadMeta: () => import('../../../data/processed/site01_connecting_ridge_terrain.json') as Promise<{ default: TerrainMetadata }>,
-    loadBinUrl: () => import('../../../data/processed/site01_connecting_ridge_terrain.bin?url'),
-    loadHorizon: () => import('../../../data/processed/site01_connecting_ridge_horizon.json'),
-    loadRecommend: () => import('../../../data/processed/site01_connecting_ridge_recommend.json') as Promise<{ default: ContractRecommendDocument }>,
+    loadMeta: () =>
+      import(
+        '../../../data/processed/site01_connecting_ridge_terrain.json'
+      ) as Promise<{ default: TerrainMetadata }>,
+    loadBinUrl: () =>
+      import('../../../data/processed/site01_connecting_ridge_terrain.bin?url'),
+    loadHorizon: () =>
+      import('../../../data/processed/site01_connecting_ridge_horizon.json'),
+    loadRecommend: () =>
+      import(
+        '../../../data/processed/site01_connecting_ridge_recommend.json'
+      ) as Promise<{ default: ContractRecommendDocument }>,
   },
   site04_shackleton_rim: {
-    loadMeta: () => import('../../../data/processed/site04_shackleton_rim_terrain.json') as Promise<{ default: TerrainMetadata }>,
-    loadBinUrl: () => import('../../../data/processed/site04_shackleton_rim_terrain.bin?url'),
-    loadHorizon: () => import('../../../data/processed/site04_shackleton_rim_horizon.json'),
-    loadRecommend: () => import('../../../data/processed/site04_shackleton_rim_recommend.json') as Promise<{ default: ContractRecommendDocument }>,
+    loadMeta: () =>
+      import(
+        '../../../data/processed/site04_shackleton_rim_terrain.json'
+      ) as Promise<{ default: TerrainMetadata }>,
+    loadBinUrl: () =>
+      import('../../../data/processed/site04_shackleton_rim_terrain.bin?url'),
+    loadHorizon: () =>
+      import('../../../data/processed/site04_shackleton_rim_horizon.json'),
+    loadRecommend: () =>
+      import(
+        '../../../data/processed/site04_shackleton_rim_recommend.json'
+      ) as Promise<{ default: ContractRecommendDocument }>,
   },
   site07_malapert_mountain: {
-    loadMeta: () => import('../../../data/processed/site07_malapert_mountain_terrain.json') as Promise<{ default: TerrainMetadata }>,
-    loadBinUrl: () => import('../../../data/processed/site07_malapert_mountain_terrain.bin?url'),
-    loadHorizon: () => import('../../../data/processed/site07_malapert_mountain_horizon.json'),
-    loadRecommend: () => import('../../../data/processed/site07_malapert_mountain_recommend.json') as Promise<{ default: ContractRecommendDocument }>,
+    loadMeta: () =>
+      import(
+        '../../../data/processed/site07_malapert_mountain_terrain.json'
+      ) as Promise<{ default: TerrainMetadata }>,
+    loadBinUrl: () =>
+      import(
+        '../../../data/processed/site07_malapert_mountain_terrain.bin?url'
+      ),
+    loadHorizon: () =>
+      import('../../../data/processed/site07_malapert_mountain_horizon.json'),
+    loadRecommend: () =>
+      import(
+        '../../../data/processed/site07_malapert_mountain_recommend.json'
+      ) as Promise<{ default: ContractRecommendDocument }>,
   },
   site09_haworth_floor: {
-    loadMeta: () => import('../../../data/processed/site09_haworth_floor_terrain.json') as Promise<{ default: TerrainMetadata }>,
-    loadBinUrl: () => import('../../../data/processed/site09_haworth_floor_terrain.bin?url'),
-    loadHorizon: () => import('../../../data/processed/site09_haworth_floor_horizon.json'),
-    loadRecommend: () => import('../../../data/processed/site09_haworth_floor_recommend.json') as Promise<{ default: ContractRecommendDocument }>,
+    loadMeta: () =>
+      import(
+        '../../../data/processed/site09_haworth_floor_terrain.json'
+      ) as Promise<{ default: TerrainMetadata }>,
+    loadBinUrl: () =>
+      import('../../../data/processed/site09_haworth_floor_terrain.bin?url'),
+    loadHorizon: () =>
+      import('../../../data/processed/site09_haworth_floor_horizon.json'),
+    loadRecommend: () =>
+      import(
+        '../../../data/processed/site09_haworth_floor_recommend.json'
+      ) as Promise<{ default: ContractRecommendDocument }>,
   },
 }
 
@@ -167,7 +217,12 @@ function computeVertexSlopeAngles(
   height: number,
   spacingM: number,
   validMask: Uint8Array,
-): { slopeDegPerVertex: Float32Array; centerSlopeDeg: number | null; minRelY: number; maxRelY: number } {
+): {
+  slopeDegPerVertex: Float32Array
+  centerSlopeDeg: number | null
+  minRelY: number
+  maxRelY: number
+} {
   const total = width * height
   const slopes = new Float32Array(total)
   slopes.fill(Number.NaN)
@@ -192,21 +247,38 @@ function computeVertexSlopeAngles(
       const east = idx + 1
       const north = idx - width
       const south = idx + width
-      if (!validMask[idx] || !validMask[west] || !validMask[east] || !validMask[north] || !validMask[south]) {
+      if (
+        !validMask[idx] ||
+        !validMask[west] ||
+        !validMask[east] ||
+        !validMask[north] ||
+        !validMask[south]
+      ) {
         continue
       }
-      const dzDx = (positions[east * 3 + 1] - positions[west * 3 + 1]) / (2 * spacingM)
-      const dzDy = (positions[south * 3 + 1] - positions[north * 3 + 1]) / (2 * spacingM)
+      const dzDx =
+        (positions[east * 3 + 1] - positions[west * 3 + 1]) / (2 * spacingM)
+      const dzDy =
+        (positions[south * 3 + 1] - positions[north * 3 + 1]) / (2 * spacingM)
       slopes[idx] = Math.atan(Math.hypot(dzDx, dzDy)) * RAD_TO_DEG
     }
   }
 
   const centerIdx = Math.floor(height / 2) * width + Math.floor(width / 2)
-  const centerSlope = Number.isFinite(slopes[centerIdx]) ? slopes[centerIdx] : null
-  return { slopeDegPerVertex: slopes, centerSlopeDeg: centerSlope, minRelY, maxRelY }
+  const centerSlope = Number.isFinite(slopes[centerIdx])
+    ? slopes[centerIdx]
+    : null
+  return {
+    slopeDegPerVertex: slopes,
+    centerSlopeDeg: centerSlope,
+    minRelY,
+    maxRelY,
+  }
 }
 
-export async function loadDemTerrain(terrainSiteId: string): Promise<DecodedDemSiteTerrain | null> {
+export async function loadDemTerrain(
+  terrainSiteId: string,
+): Promise<DecodedDemSiteTerrain | null> {
   const existing = demCache.get(terrainSiteId)
   if (existing) return existing
 
@@ -235,13 +307,14 @@ export async function loadDemTerrain(terrainSiteId: string): Promise<DecodedDemS
         validMask[i] = Number.isFinite(view.getFloat32(i * 4, true)) ? 1 : 0
       }
 
-      const { slopeDegPerVertex, centerSlopeDeg, minRelY, maxRelY } = computeVertexSlopeAngles(
-        decoded.positions,
-        metadata.width,
-        metadata.height,
-        metadata.spacing_m,
-        validMask,
-      )
+      const { slopeDegPerVertex, centerSlopeDeg, minRelY, maxRelY } =
+        computeVertexSlopeAngles(
+          decoded.positions,
+          metadata.width,
+          metadata.height,
+          metadata.spacing_m,
+          validMask,
+        )
 
       return {
         siteId: terrainSiteId,
@@ -265,13 +338,16 @@ export async function loadDemTerrain(terrainSiteId: string): Promise<DecodedDemS
   return promise
 }
 
-function circularHorizonLookup(horizon: ContractHorizonPoint[], azimuthDeg: number): number | null {
+function circularHorizonLookup(
+  horizon: ContractHorizonPoint[],
+  azimuthDeg: number,
+): number | null {
   if (!horizon.length) return null
   const step = 360 / horizon.length
   const normAz = ((azimuthDeg % 360) + 360) % 360
   const idx0 = Math.floor(normAz / step) % horizon.length
   const idx1 = (idx0 + 1) % horizon.length
-  const frac = (normAz / step) - Math.floor(normAz / step)
+  const frac = normAz / step - Math.floor(normAz / step)
   const a = horizon[idx0]?.elevation_deg ?? null
   const b = horizon[idx1]?.elevation_deg ?? null
   if (a === null || b === null) return null
@@ -293,6 +369,9 @@ function buildExploratoryAnalysis(options: {
   const totalSteps = (DEFAULT_DURATION_HOURS * 60) / DEFAULT_SAMPLE_MINUTES + 1
   const startMs = Date.parse(DEFAULT_START_UTC)
   const samples: AnalysisSample[] = []
+  let unknownSun = false
+  let unknownEarth = false
+  let unknownBoth = false
   let sunLitSteps = 0
   let earthVisSteps = 0
   let bothVisSteps = 0
@@ -303,11 +382,25 @@ function buildExploratoryAnalysis(options: {
 
   for (let i = 0; i < totalSteps; i++) {
     const metHours = (i * DEFAULT_SAMPLE_MINUTES) / 60
-    const utc = new Date(startMs + metHours * 3_600_000).toISOString().replace('.000Z', 'Z')
+    const utc = new Date(startMs + metHours * 3_600_000)
+      .toISOString()
+      .replace('.000Z', 'Z')
     // Exploratory synodic solar azimuth rotation + lunar librations around south pole.
-    const sunAz = ((180 + metHours * 0.508 - normalizeLongitudeDeg(options.longitude_deg)) % 360 + 360) % 360
-    const sunEl = 1.15 + Math.sin(metHours * 0.012 + options.latitude_deg * 0.1) * 0.55
-    const earthAz = (((-normalizeLongitudeDeg(options.longitude_deg)) + Math.sin(metHours * 0.0096) * 5.2) % 360 + 360) % 360
+    const sunAz =
+      (((180 +
+        metHours * 0.508 -
+        normalizeLongitudeDeg(options.longitude_deg)) %
+        360) +
+        360) %
+      360
+    const sunEl =
+      1.15 + Math.sin(metHours * 0.012 + options.latitude_deg * 0.1) * 0.55
+    const earthAz =
+      (((-normalizeLongitudeDeg(options.longitude_deg) +
+        Math.sin(metHours * 0.0096) * 5.2) %
+        360) +
+        360) %
+      360
     const earthEl = 2.6 + Math.sin(metHours * 0.0095 + 0.4) * 3.1
 
     const sunHoriz = circularHorizonLookup(options.horizon, sunAz)
@@ -321,6 +414,12 @@ function buildExploratoryAnalysis(options: {
     const earthVis = earthHoriz === null ? null : earthEl > earthHoriz
 
     if (i < totalSteps - 1) {
+      unknownSun ||= sunVis === null
+      unknownEarth ||= earthVis === null
+      unknownBoth ||=
+        sunVis !== false &&
+        earthVis !== false &&
+        (sunVis === null || earthVis === null)
       if (sunFrac !== null) sunLitSteps += sunFrac
       if (earthVis) earthVisSteps += 1
       if (sunVis && earthVis) bothVisSteps += 1
@@ -393,18 +492,23 @@ function buildExploratoryAnalysis(options: {
       screening_status: classifySlopeBand(options.slopeDeg),
     },
     metrics: {
-      sunlight_hours: sunHours,
-      sunlight_fraction: sunHours / DEFAULT_DURATION_HOURS,
-      max_darkness_hours: maxDark,
-      earth_visible_hours: earthHours,
-      earth_visible_fraction: earthHours / DEFAULT_DURATION_HOURS,
-      max_earth_occlusion_hours: maxOcc,
-      both_visible_hours: bothHours,
+      sunlight_hours: unknownSun ? null : sunHours,
+      sunlight_fraction: unknownSun ? null : sunHours / DEFAULT_DURATION_HOURS,
+      max_darkness_hours: unknownSun ? null : maxDark,
+      earth_visible_hours: unknownEarth ? null : earthHours,
+      earth_visible_fraction: unknownEarth
+        ? null
+        : earthHours / DEFAULT_DURATION_HOURS,
+      max_earth_occlusion_hours: unknownEarth ? null : maxOcc,
+      both_visible_hours: unknownBoth ? null : bothHours,
     },
   }
 }
 
-async function fetchJsonOrNull<T>(url: string, init?: RequestInit): Promise<T | null> {
+async function fetchJsonOrNull<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T | null> {
   try {
     const response = await fetch(url, init)
     if (!response.ok) return null
@@ -421,6 +525,15 @@ function computeCsvFromAnalysis(analysis: ContractAnalysisDocument): string {
     `# site_id: ${analysis.site_id}`,
     `# provenance_data_kind: ${analysis.provenance.data_kind}`,
     `# provenance_model_version: ${analysis.provenance.model_version}`,
+    ...analysis.provenance.sources.map(
+      (s) => `# source: ${s.id}|${s.sha256}|${s.uri}`,
+    ),
+    ...analysis.provenance.assumptions.map(
+      (a) => `# assumption: ${a.replace(/[\r\n]+/g, ' ')}`,
+    ),
+    `# reference_radius_m: ${analysis.coordinates.reference_radius_m}`,
+    `# sample_minutes: ${analysis.sample_minutes}`,
+    `# metrics: ${JSON.stringify(analysis.metrics)}`,
     `# coordinates_lat_lon_elev_m: ${analysis.coordinates.latitude_deg},${analysis.coordinates.longitude_deg},${analysis.coordinates.elevation_m}`,
     `# frame: ${analysis.coordinates.frame}`,
     `# observer_height_m: ${analysis.observer_height_m}`,
@@ -442,20 +555,20 @@ function computeCsvFromAnalysis(analysis: ContractAnalysisDocument): string {
     ].join(','),
   ]
 
-  const rows = analysis.samples.map(s =>
+  const rows = analysis.samples.map((s) =>
     [
       s.utc,
       s.met_hours,
-      s.sun.azimuth_deg.toFixed(4),
-      s.sun.elevation_deg.toFixed(4),
-      s.sun.angular_diameter_deg.toFixed(4),
-      s.sun.horizon_deg === null ? '' : s.sun.horizon_deg.toFixed(4),
+      s.sun.azimuth_deg,
+      s.sun.elevation_deg,
+      s.sun.angular_diameter_deg,
+      s.sun.horizon_deg === null ? '' : s.sun.horizon_deg,
       s.sun.visible === null ? '' : String(s.sun.visible),
-      s.sun.illumination_fraction === null ? '' : s.sun.illumination_fraction.toFixed(4),
-      s.earth.azimuth_deg.toFixed(4),
-      s.earth.elevation_deg.toFixed(4),
-      s.earth.angular_diameter_deg.toFixed(4),
-      s.earth.horizon_deg === null ? '' : s.earth.horizon_deg.toFixed(4),
+      s.sun.illumination_fraction === null ? '' : s.sun.illumination_fraction,
+      s.earth.azimuth_deg,
+      s.earth.elevation_deg,
+      s.earth.angular_diameter_deg,
+      s.earth.horizon_deg === null ? '' : s.earth.horizon_deg,
       s.earth.visible === null ? '' : String(s.earth.visible),
     ].join(','),
   )
@@ -472,7 +585,7 @@ export async function exportAnalysisReport(
       const response = await fetch('/api/export', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ analysis, format }),
+        body: JSON.stringify({ analysis_id: analysis.analysis_id, format }),
       })
       if (response.ok) {
         const blob = await response.blob()
@@ -488,7 +601,10 @@ export async function exportAnalysisReport(
     format === 'json'
       ? JSON.stringify(analysis, null, 2)
       : computeCsvFromAnalysis(analysis)
-  const mime = format === 'json' ? 'application/json;charset=utf-8' : 'text/csv;charset=utf-8'
+  const mime =
+    format === 'json'
+      ? 'application/json;charset=utf-8'
+      : 'text/csv;charset=utf-8'
   triggerDownload(new Blob([content], { type: mime }), filename)
 }
 
@@ -507,8 +623,14 @@ export async function loadCatalogSiteWorkspace(
   site: CatalogSiteEntry,
   observerHeightM: 2 | 5 = 2,
 ): Promise<LoadedSiteWorkspace> {
-  const demPromise = site.terrainSiteId ? loadDemTerrain(site.terrainSiteId) : Promise.resolve(null)
-  const recommendLoader = site.terrainSiteId ? PROCESSED_ASSET_LOADERS[site.terrainSiteId] : undefined
+  if (observerHeightM !== 2)
+    throw new Error('Only the recorded 2 m observer is supported.')
+  const demPromise = site.terrainSiteId
+    ? loadDemTerrain(site.terrainSiteId)
+    : Promise.resolve(null)
+  const recommendLoader = site.terrainSiteId
+    ? PROCESSED_ASSET_LOADERS[site.terrainSiteId]
+    : undefined
 
   const livePromise =
     site.scienceSiteId && site.hasVerifiedAnalysis
@@ -526,18 +648,24 @@ export async function loadCatalogSiteWorkspace(
         })
       : Promise.resolve(null)
 
-  const [demTerrain, liveAnalysis] = await Promise.all([demPromise, livePromise])
+  const [demTerrain, liveAnalysis] = await Promise.all([
+    demPromise,
+    livePromise,
+  ])
 
   let recommendations: ContractRecommendDocument | null = null
   if (site.scienceSiteId) {
-    recommendations = await fetchJsonOrNull<ContractRecommendDocument>('/api/recommend', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        origin_site_id: site.scienceSiteId,
-        search_radius_m: DEFAULT_RECOMMEND_RADIUS_M,
-      }),
-    })
+    recommendations = await fetchJsonOrNull<ContractRecommendDocument>(
+      '/api/recommend',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin_site_id: site.scienceSiteId,
+          search_radius_m: DEFAULT_RECOMMEND_RADIUS_M,
+        }),
+      },
+    )
   }
   if (!recommendations && recommendLoader) {
     try {
@@ -564,20 +692,26 @@ export async function loadCatalogSiteWorkspace(
         },
       }),
     })
-    const effectiveSlope = liveAnalysis.slope.angle_deg ?? demTerrain?.centerSlopeDeg ?? null
+    const effectiveSlope =
+      liveAnalysis.slope.angle_deg ?? demTerrain?.centerSlopeDeg ?? null
     return {
       target: {
         id: site.id,
         name: site.name,
         latitude_deg: liveAnalysis.coordinates.latitude_deg,
-        longitude_deg: normalizeLongitudeDeg(liveAnalysis.coordinates.longitude_deg),
+        longitude_deg: normalizeLongitudeDeg(
+          liveAnalysis.coordinates.longitude_deg,
+        ),
         elevation_m: liveAnalysis.coordinates.elevation_m,
         isCatalogSite: true,
         catalogEntry: site,
       },
-      sourceMode: liveAnalysis.provenance.data_kind === 'live' ? 'live_api' : 'cached_real',
+      sourceMode:
+        liveAnalysis.provenance.data_kind === 'live_real'
+          ? 'live_api'
+          : 'cached_real',
       sourceNote:
-        liveAnalysis.provenance.data_kind === 'live'
+        liveAnalysis.provenance.data_kind === 'live_real'
           ? 'Live FastAPI engine + verified NASA LOLA DEM'
           : 'Verified FastAPI cached NASA LOLA DEM & JPL Horizons',
       analysis: liveAnalysis,
@@ -592,14 +726,19 @@ export async function loadCatalogSiteWorkspace(
   // Case 2: Connecting Ridge canonical site offline fixture fallback (real tracked data).
   if (site.id === 'site01_connecting_ridge') {
     const [{ default: nominal }, { default: diff }] = await Promise.all([
-      import('../../../backend/tests/fixtures/science/site01/analysis_nominal.json') as Promise<{
+      import(
+        '../../../backend/tests/fixtures/science/site01/analysis_nominal.json'
+      ) as Promise<{
         default: ContractAnalysisDocument
       }>,
-      import('../../../backend/tests/fixtures/science/site01/diff_delay48h.json') as Promise<{
+      import(
+        '../../../backend/tests/fixtures/science/site01/diff_delay48h.json'
+      ) as Promise<{
         default: ContractDiffDocument
       }>,
     ])
-    const effectiveSlope = nominal.slope.angle_deg ?? demTerrain?.centerSlopeDeg ?? null
+    const effectiveSlope =
+      nominal.slope.angle_deg ?? demTerrain?.centerSlopeDeg ?? null
     return {
       target: {
         id: site.id,
@@ -611,10 +750,7 @@ export async function loadCatalogSiteWorkspace(
         catalogEntry: site,
       },
       sourceMode: 'cached_real',
-      sourceNote:
-        observerHeightM === 5
-          ? 'Real NASA LOLA + JPL Horizons fixture (2.0 m cached reference)'
-          : 'Real NASA LOLA DEM + 14-day JPL Horizons (Nov 15–29, 2026)',
+      sourceNote: 'Real NASA LOLA DEM + 14-day JPL Horizons (Nov 15–29, 2026)',
       analysis: nominal,
       diff48h: diff,
       recommendations,
@@ -632,8 +768,12 @@ export async function loadCatalogSiteWorkspace(
       const { default: hDoc } = await recommendLoader.loadHorizon()
       realHorizon = hDoc.horizon_angles.map((angle, az) => ({
         azimuth_deg: az,
-        elevation_deg: typeof angle === 'number' && Number.isFinite(angle) ? angle : null,
-        coverage: typeof angle === 'number' && Number.isFinite(angle) ? 'complete' : 'unknown',
+        elevation_deg:
+          typeof angle === 'number' && Number.isFinite(angle) ? angle : null,
+        coverage:
+          typeof angle === 'number' && Number.isFinite(angle)
+            ? 'complete'
+            : 'unknown',
       }))
     } catch {
       realHorizon = []
@@ -667,7 +807,8 @@ export async function loadCatalogSiteWorkspace(
       catalogEntry: site,
     },
     sourceMode: 'dem_preview',
-    sourceNote: 'Real NASA LOLA 129×129 DEM + real 360° horizon · Preview ephemeris',
+    sourceNote:
+      'Real NASA LOLA 129×129 DEM + real 360° horizon · Preview ephemeris',
     analysis: previewAnalysis,
     diff48h: null,
     recommendations,
@@ -687,11 +828,13 @@ export function buildCustomCoordinateWorkspace(options: {
 }): LoadedSiteWorkspace {
   const normLon = normalizeLongitudeDeg(options.longitude_deg)
   const step = 360 / Math.max(options.horizonAnglesDeg.length, 1)
-  const horizon: ContractHorizonPoint[] = options.horizonAnglesDeg.map((el, i) => ({
-    azimuth_deg: i * step,
-    elevation_deg: Number.isFinite(el) ? el : null,
-    coverage: Number.isFinite(el) ? 'complete' : 'unknown',
-  }))
+  const horizon: ContractHorizonPoint[] = options.horizonAnglesDeg.map(
+    (el, i) => ({
+      azimuth_deg: i * step,
+      elevation_deg: Number.isFinite(el) ? el : null,
+      coverage: Number.isFinite(el) ? 'complete' : 'unknown',
+    }),
+  )
 
   const analysis = buildExploratoryAnalysis({
     siteId: `coord-${options.latitude_deg.toFixed(2)}-${normLon.toFixed(1)}`,
@@ -718,7 +861,8 @@ export function buildCustomCoordinateWorkspace(options: {
       isCatalogSite: false,
     },
     sourceMode: 'synthetic',
-    sourceNote: 'Exploratory spherical terrain preview (outside LOLA DEM patches)',
+    sourceNote:
+      'Exploratory spherical terrain preview (outside LOLA DEM patches)',
     analysis,
     diff48h: null,
     recommendations: null,

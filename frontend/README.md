@@ -1,47 +1,19 @@
-# HORIZON OPS frontend — C/D integration preview
+# HORIZON OPS — observation and arrival-window explorer
 
-React + Vite + TypeScript dashboard with Person D's React Three Fiber scene embedded in Person C's layout.
+The main app provides one recorded scientific demonstration and separate terrain inspection views. Run Node 24 with `npm --prefix frontend ci` and `npm --prefix frontend run dev`. Optional backend: follow `backend/README.md` and run on port 8000; Vite proxies `/api`. Recorded Site01 playback and exports work without a backend or raw DEM download.
 
-## Run from the repository root
+## Demonstration
 
-Use Node 24 and npm (CI uses Node 24).
+1. Choose **Explore the verified demo** (Connecting Ridge).
+2. Inspect the fixed 2 m observer for 15–29 November 2026. Playback selects recorded 30-minute samples.
+3. Read sunlight-equivalent hours, darkness, Earth-centre visibility, longest Earth blockage and overlap. Terrain clicks inspect a separate point and never relocate the analyzed observer.
+4. Open **Arrival +48 h** for 17 November–1 December. Inspect a changed interval and read both nominal and delayed geometry at the selected elapsed time.
+5. Open **Data & method** for source URLs, SHA-256 records, model assumptions and sampling limits. Export JSON or CSV; offline CSV retains precision, hashes, assumptions and mission metadata.
 
-```sh
-npm --prefix frontend ci
-npm --prefix frontend run dev
-```
+Other catalog sites expose terrain inspection only. Their exploratory astronomy is withheld from results and the viewer. Unsupported dates/heights are not editable. Candidate markers are terrain suggestions, not newly analyzed or certified landing sites. The globe, light and terrain context are illustrative; visibility comes from the horizon calculation. This release does not claim global real DEM coverage, a radio link budget, or event-refined transition times.
 
-Open the local URL printed by Vite. No Python server or NASA access is required for this preview. Stop the server with Ctrl+C.
+## Checks
 
-```sh
-npm --prefix frontend test
-npm --prefix frontend run build
-```
+`npm --prefix frontend run build` includes TypeScript validation. `npm --prefix frontend test` runs geometry/adapter tests and science-client regression tests for unknown coverage, unsupported heights, export request identity and offline provenance. The renderer is loaded separately from the initial interface. Browser/GPU, keyboard and responsive visual acceptance still require testing on the target device; the cloud browser was unavailable during this implementation.
 
-The build includes type checking. A large-chunk warning reflects the lazily loaded Three.js scene; it is a performance follow-up, not a failed build. The scene dependencies are installed by the main frontend; Vite deduplicates React/ReactDOM/Three/Fiber even if the independent scene preview was installed separately.
-
-## Two explicitly different modes
-
-- **Site terrain grid · unverified** (default): selecting a landing site loads its exported JSON from `data/processed/`. The adapter anchors the marker to the grid's sampled observer height and shows the stored nominal elevation separately. Frame/orientation/height-reference validation is pending, so Sun/Earth overlays and fixture scrubbing are disabled. Lighting is neutral illustration, not sunlight computation.
-- **Synthetic direction demo**: the existing artificial crater and celestial angles are displayed. The shared three-sample fixture timeline updates the selected MET, UTC and scene directions. Its timestamps remain the fixture's actual UTC values. It does not recalculate results for selected mission dates or landing sites.
-
-The site controls still store planning inputs in React state. Telemetry remains synthetic and static, clearly labeled, independent of the terrain shown. The 2D map, real visibility engine, scientific shadows, live API analysis, LunaDiff and exports are not connected in this integration.
-
-## State and handoff
-
-`App.tsx` owns mission setup, terrain source and selected sample index. `LunarViewport` maps C's site IDs to B's four JSON assets, validates/adapts the selected grid and supplies mesh props to `SceneView`. Loading is keyed by site/source/retry; old results cannot be displayed under a new site's label. A failed load shows a retry action. Switching sites or modes unmounts/replaces scene resources; the binary loader is still supported for the synthetic mode.
-
-`TimelineScrubber` is controlled by App and selects a fixture sample. Numeric direction values remain outside WebGL. The renderer also enforces hiding celestial overlays for `dataKind="unverified"`, even if a caller requests them. C can later replace the fixture provider with verified A/B results while preserving the controlled component boundary.
-
-Pending science handoff: verify B's crop location, grid orientation, nodata handling, reference sphere and actual observer height; use those same coordinates/heights in A's ephemeris request. Do not relabel current exported grids as scientifically validated. No backend producer code or source terrain files were changed by this integration.
-
-See [scene documentation](src/scene/README.md) and [contract conventions](../docs/contracts.md).
-
-## Manual checks
-
-1. Default view loads Connecting Ridge and reports nominal/site-grid height differences without celestial overlays.
-2. Change site to Shackleton/Malapert/Haworth: its terrain loads; the previous mesh is not retained under the new title.
-3. Select synthetic direction demo, then scrub the timeline: UTC/MET and Sun angle values change together. Planning-date edits must not change fixture UTC.
-4. Test overview/surface/reset, wireframe, height exaggeration, orbit and zoom.
-5. Return to site terrain: timeline disables and celestial overlays disappear.
-6. The 2D tab says the map is pending; it does not pretend to render a geographic map.
+This branch starts from main `6046515`. It does not merge the separate `Frontend-Overhaul` camera/imagery update, B's later renderer changes or the Cesium experiment. Those require independent integration and scientific/display validation.
