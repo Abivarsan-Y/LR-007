@@ -41,4 +41,4 @@ For row `r`, column `c`: `x=(c-(width-1)/2)*spacing`, `z=(r-(height-1)/2)*spacin
 
 The validator rejects malformed schema data, invalid UTC/MET alignment, reversed intervals, unknown-horizon visibility, missing real-source attribution and corrupted binary assets. It does not validate terrain science, orbital calculations, metric physics or every relationship between separate documents. Passing these checks is an interface guarantee within these limits.
 
-Next: review formats with A/B/C; expand negative/unknown fixtures; wire checks into their applications; then add D's standalone Three.js terrain viewer using the synthetic grid. The renderer must display a synthetic-data label. Real offline demo assets will be prepared separately from these fixtures.
+D's standalone terrain preview now consumes the synthetic grid and analysis. See `frontend/src/scene/README.md` for its component interface, controls and limitations. It displays an explicit synthetic-data label. Next: review formats with A/B/C, expand negative/unknown fixtures, and wire checks into their applications. Real offline demo assets will be prepared separately from these fixtures.
