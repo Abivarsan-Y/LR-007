@@ -17,11 +17,11 @@
   },
   "site_id": "site04_shackleton_rim",
   "asset_path": "data/processed/site04_shackleton_rim_terrain.bin",
-  "sha256": "24046a36c5189cb21009f1a655af7556e22b9c97df3b0566e1d3649c359dd7ca",
+  "sha256": "f1e9dde230d7a6c5f9c1f1b03f060369f2138b8b453fe5691b3e1258ca5f173b",
   "encoding": "float32_le",
   "width": 129,
   "height": 129,
-  "spacing_m": 20.0,
+  "spacing_m": 160.0,
   "coordinates": {
     "latitude_deg": -89.9,
     "longitude_deg": 0.0,

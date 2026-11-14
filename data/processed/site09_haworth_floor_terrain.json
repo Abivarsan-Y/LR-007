@@ -17,11 +17,11 @@
   },
   "site_id": "site09_haworth_floor",
   "asset_path": "data/processed/site09_haworth_floor_terrain.bin",
-  "sha256": "14148baf61fba001bffe83fe5715c09a484c507c9af50d8957800bc96d7b7649",
+  "sha256": "38e4c8d495a2f70715f1f690d4c6428bf85ea07bf7e387edbfa07f97ded68b25",
   "encoding": "float32_le",
   "width": 129,
   "height": 129,
-  "spacing_m": 20.0,
+  "spacing_m": 160.0,
   "coordinates": {
     "latitude_deg": -87.4,
     "longitude_deg": -4.7999999999999545,

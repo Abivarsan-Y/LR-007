@@ -16,49 +16,49 @@
     ]
   },
   "origin_site_id": "site09_haworth_floor",
-  "search_radius_m": 1152.0,
+  "search_radius_m": 9216.0,
   "candidates": [
     {
       "site_id": "site09_haworth_floor_safe_haven_1",
       "coordinates": {
-        "latitude_deg": -87.4259,
-        "longitude_deg": -5.27577,
-        "elevation_m": -3332.4,
+        "latitude_deg": -87.14056,
+        "longitude_deg": -5.95552,
+        "elevation_m": -2953.3,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1020.78,
-      "bearing_deg": 214.62,
-      "slope_deg": 1.28,
-      "sunlight_fraction_delta": 0.05
+      "distance_m": 8046.27,
+      "bearing_deg": 342.65,
+      "slope_deg": 1.37,
+      "sunlight_fraction_delta": 0.149
     },
     {
       "site_id": "site09_haworth_floor_safe_haven_2",
       "coordinates": {
-        "latitude_deg": -87.39187,
-        "longitude_deg": -5.01764,
-        "elevation_m": -3378.1,
+        "latitude_deg": -87.47722,
+        "longitude_deg": -6.51282,
+        "elevation_m": -3226.4,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 388.33,
-      "bearing_deg": 304.51,
-      "slope_deg": 0.15,
-      "sunlight_fraction_delta": 0.05
+      "distance_m": 3298.48,
+      "bearing_deg": 219.09,
+      "slope_deg": 0.19,
+      "sunlight_fraction_delta": 0.054
     },
     {
       "site_id": "site09_haworth_floor_safe_haven_3",
       "coordinates": {
-        "latitude_deg": -87.4359,
-        "longitude_deg": -4.57167,
-        "elevation_m": -3361.9,
+        "latitude_deg": -87.47065,
+        "longitude_deg": -5.65454,
+        "elevation_m": -3246.0,
         "frame": "MOON_ME_DE421",
         "reference_radius_m": 1737400
       },
-      "distance_m": 1132.96,
-      "bearing_deg": 159.33,
-      "slope_deg": 1.61,
-      "sunlight_fraction_delta": 0.05
+      "distance_m": 2437.05,
+      "bearing_deg": 203.2,
+      "slope_deg": 0.54,
+      "sunlight_fraction_delta": 0.047
     }
   ]
 }

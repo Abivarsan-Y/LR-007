@@ -276,18 +276,30 @@ function enuMetersToSceneVec(
   verticalScale: number,
 ): THREE.Vector3 {
   const scaleXZ = (DEM_PATCH_HALF_EXTENT * 2) / Math.max(dem.span, 1)
-  // Center vertical elevation around midpoint so deep valleys (-375m) stay cleanly above MOON_RADIUS
-  const midRelY = (dem.minRelY + dem.maxRelY) * 0.5
-  const baseR = MOON_RADIUS + 0.065
   const tangentX = xEastM * scaleXZ
   const tangentNorth = -zSouthM * scaleXZ
-  const radialShift = (yUpM - midRelY) * scaleXZ * verticalScale
+  const tangentDist = Math.hypot(tangentX, tangentNorth)
+  const arcAngle = tangentDist / MOON_RADIUS
 
-  return frame.up
-    .clone()
-    .multiplyScalar(baseR + radialShift)
-    .addScaledVector(frame.east, tangentX)
-    .addScaledVector(frame.north, tangentNorth)
+  const sampleUnit = new THREE.Vector3()
+  if (tangentDist < 1e-6) {
+    sampleUnit.copy(frame.up)
+  } else {
+    const dir = new THREE.Vector3()
+      .addScaledVector(frame.east, tangentX)
+      .addScaledVector(frame.north, tangentNorth)
+      .normalize()
+    sampleUnit
+      .copy(frame.up)
+      .multiplyScalar(Math.cos(arcAngle))
+      .addScaledVector(dir, Math.sin(arcAngle))
+      .normalize()
+  }
+
+  // Smooth, physically proportionate vertical relief without jagged artificial spikes
+  const radialShift = yUpM * scaleXZ * verticalScale * 0.82
+  const baseR = MOON_RADIUS + 0.008
+  return sampleUnit.multiplyScalar(baseR + radialShift)
 }
 
 function enuDirectionToWorld(
@@ -802,14 +814,14 @@ export function LunarStage3D({
       for (let c = w - 1; c > 0; c--) ringCoords.push([h - 1, c])
       for (let r = h - 1; r > 0; r--) ringCoords.push([r, 0])
 
-      const midRelY = (dem.minRelY + dem.maxRelY) * 0.5
       ringCoords.forEach(([row, col], idx) => {
         const i = row * w + col
         const xE = dem.positions[i * 3]
         const yU = dem.positions[i * 3 + 1]
         const zS = dem.positions[i * 3 + 2]
         const innerPt = enuMetersToSceneVec(xE, yU, zS, dem, frame, vScale)
-        const outerPt = enuMetersToSceneVec(xE * 2.4, midRelY - 120, zS * 2.4, dem, frame, vScale)
+        // Outer skirt point drapes smoothly to lunar sphere level at 1.35x distance
+        const outerPt = enuMetersToSceneVec(xE * 1.35, yU * 0.15, zS * 1.35, dem, frame, vScale)
 
         ringPositions[idx * 6 + 0] = innerPt.x
         ringPositions[idx * 6 + 1] = innerPt.y
@@ -818,13 +830,14 @@ export function LunarStage3D({
         ringPositions[idx * 6 + 4] = outerPt.y
         ringPositions[idx * 6 + 5] = outerPt.z
 
-        // Inner skirt color blends seamlessly with border vertex, fading softly toward outer void
-        ringColors[idx * 6 + 0] = colors[i * 3] * 0.9
-        ringColors[idx * 6 + 1] = colors[i * 3 + 1] * 0.9
-        ringColors[idx * 6 + 2] = colors[i * 3 + 2] * 0.9
-        ringColors[idx * 6 + 3] = 0.03
-        ringColors[idx * 6 + 4] = 0.035
-        ringColors[idx * 6 + 5] = 0.045
+        // Inner skirt color blends seamlessly with border vertex
+        ringColors[idx * 6 + 0] = colors[i * 3] * 0.95
+        ringColors[idx * 6 + 1] = colors[i * 3 + 1] * 0.95
+        ringColors[idx * 6 + 2] = colors[i * 3 + 2] * 0.95
+        // Outer skirt matches ambient lunar regolith tone (neutral grey-white)
+        ringColors[idx * 6 + 3] = 0.48
+        ringColors[idx * 6 + 4] = 0.49
+        ringColors[idx * 6 + 5] = 0.51
 
         const nextIdx = (idx + 1) % ringCoords.length
         const a = idx * 2
@@ -1069,7 +1082,7 @@ export function LunarStage3D({
             dem.metadata.coordinates.longitude_deg,
           )
           const demFrame = getLocalTangentFrame(demCenter)
-          const basePos = demFrame.up.clone().multiplyScalar(MOON_RADIUS + 0.065)
+          const basePos = demFrame.up.clone().multiplyScalar(MOON_RADIUS + 0.008)
           const delta = hitPt.clone().sub(basePos)
           const scaleXZ = (DEM_PATCH_HALF_EXTENT * 2) / Math.max(dem.span, 1)
           const eastM = delta.dot(demFrame.east) / scaleXZ
@@ -1277,10 +1290,10 @@ export function LunarStage3D({
         demFrameMat.opacity = alpha * 0.42
         procPatchMesh.visible = false
 
-        // Smoothly fade macro sphere out in surface view so zero sphere facets ever clip DEM valleys
-        const moonFade = 1 - THREE.MathUtils.smoothstep(alpha, 0.45, 0.88)
+        // Keep moon globe softly visible so observer always sees surrounding lunar context
+        const moonFade = Math.max(0.35, 1 - THREE.MathUtils.smoothstep(alpha, 0.5, 0.95))
         moonMat.opacity = moonFade
-        moonMesh.visible = moonFade > 0.02
+        moonMesh.visible = true
       } else if (alpha > 0.005) {
         procPatchMesh.visible = true
         procPatchMat.opacity = alpha
@@ -1307,7 +1320,7 @@ export function LunarStage3D({
 
       const targetUnit = activeSel ? selectedUnit : gazeUnit
       const targetBaseR = useRealDem
-        ? MOON_RADIUS + 0.065
+        ? MOON_RADIUS + 0.008
         : MOON_RADIUS + getSphericalElevationOffset(targetUnit, true) * 1.8
       desiredLookAt.copy(targetUnit).multiplyScalar(targetBaseR)
 

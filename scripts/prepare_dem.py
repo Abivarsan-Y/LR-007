@@ -53,8 +53,13 @@ def prepare_site(
 
     # 1. Generate 129x129 Local East/North (ENU) Grid for Three.js Celestial Rendering
     grid_size_129 = 129
-    spacing_m_129 = 20.0
-    physical_size_129 = (grid_size_129 - 1) * spacing_m_129  # 2560m
+    if site_id == "site01_connecting_ridge":
+        spacing_m_129 = 20.0   # 2.56km box (1152m search radius) aligned with Site 01 API contract and 5m DEM
+    elif site_id in ("site04_shackleton_rim", "site07_malapert_mountain", "site09_haworth_floor"):
+        spacing_m_129 = 160.0  # 20.48km box, captures complete 21km crater bowl and mountain massif!
+    else:
+        spacing_m_129 = 20.0
+    physical_size_129 = (grid_size_129 - 1) * spacing_m_129
 
     active_dems = [p for p in (dem_paths or []) if p.exists()]
     heights_129 = None
