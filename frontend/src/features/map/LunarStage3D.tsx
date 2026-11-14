@@ -11,6 +11,7 @@ import type {
 import { classifySlopeBand, normalizeLongitudeDeg } from '../../api/client'
 
 export type TerrainOverlayMode = 'albedo' | 'slope'
+export type SurfaceCameraPreset = 'OBLIQUE' | 'HORIZON'
 
 export interface SurfacePickEvent {
   latitude_deg: number
@@ -28,6 +29,8 @@ interface Props {
   focusCoordinates: { latitude_deg: number; longitude_deg: number } | null
   hasSelection: boolean
   desiredCameraMode: 'ORBITAL' | 'SURFACE'
+  surfacePreset?: SurfaceCameraPreset
+  useNasaTrekImagery?: boolean
   cameraPresetNonce: number
   demTerrain: DecodedDemSiteTerrain | null
   currentSample: AnalysisSample | null
@@ -40,6 +43,7 @@ interface Props {
   onCameraModeChange: (mode: 'ORBITAL' | 'SURFACE') => void
   onPickPoint: (pick: SurfacePickEvent) => void
   onSelectCatalogSite: (site: CatalogSiteEntry) => void
+  onNasaImageryStatusChange?: (status: 'loading' | 'loaded' | 'offline') => void
 }
 
 const MOON_RADIUS = 2.0
@@ -319,6 +323,8 @@ export function LunarStage3D({
   focusCoordinates,
   hasSelection,
   desiredCameraMode,
+  surfacePreset = 'OBLIQUE',
+  useNasaTrekImagery = true,
   cameraPresetNonce,
   demTerrain,
   currentSample,
@@ -331,6 +337,7 @@ export function LunarStage3D({
   onCameraModeChange,
   onPickPoint,
   onSelectCatalogSite,
+  onNasaImageryStatusChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -339,6 +346,8 @@ export function LunarStage3D({
     selectedSiteId,
     focusCoordinates,
     hasSelection,
+    surfacePreset,
+    useNasaTrekImagery,
     demTerrain,
     currentSample,
     recommendations,
@@ -350,12 +359,15 @@ export function LunarStage3D({
     onCameraModeChange,
     onPickPoint,
     onSelectCatalogSite,
+    onNasaImageryStatusChange,
   })
   latestPropsRef.current = {
     catalogSites,
     selectedSiteId,
     focusCoordinates,
     hasSelection,
+    surfacePreset,
+    useNasaTrekImagery,
     demTerrain,
     currentSample,
     recommendations,
@@ -367,11 +379,15 @@ export function LunarStage3D({
     onCameraModeChange,
     onPickPoint,
     onSelectCatalogSite,
+    onNasaImageryStatusChange,
   }
 
   const cameraControlsRef = useRef<{
     jumpToTarget: (lat: number, lon: number, surfaceMode: boolean) => void
     setMode: (mode: 'ORBITAL' | 'SURFACE') => void
+    setSurfacePreset: (preset: SurfaceCameraPreset) => void
+    nudgeSurfaceAzimuth: (deltaRad: number) => void
+    applyMoonGlobeColors: () => void
     rebuildDemMesh: () => void
     updateMarkersAndLights: () => void
   } | null>(null)
@@ -439,10 +455,15 @@ export function LunarStage3D({
 
     const posAttr = moonGeo.attributes.position
     const moonColors = new Float32Array(posAttr.count * 3)
+    const moonUnitLatLon = new Float32Array(posAttr.count * 2)
     const vTemp = new THREE.Vector3()
     for (let i = 0; i < posAttr.count; i++) {
       vTemp.fromBufferAttribute(posAttr, i)
       const unit = vTemp.clone().normalize()
+      const { lat, lon } = unitVecToLatLon(unit)
+      moonUnitLatLon[i * 2] = lat
+      moonUnitLatLon[i * 2 + 1] = lon
+
       const elev = getSphericalElevationOffset(unit, false)
       vTemp.copy(unit).multiplyScalar(MOON_RADIUS + elev * 1.8)
       posAttr.setXYZ(i, vTemp.x, vTemp.y, vTemp.z)
@@ -454,6 +475,7 @@ export function LunarStage3D({
       moonColors[i * 3 + 1] = regolith * 0.97
       moonColors[i * 3 + 2] = regolith * 1.01
     }
+    const baseProceduralColors = new Float32Array(moonColors)
     moonGeo.setAttribute('color', new THREE.BufferAttribute(moonColors, 3))
     moonGeo.computeVertexNormals()
     const moonMat = new THREE.MeshStandardMaterial({
@@ -465,6 +487,103 @@ export function LunarStage3D({
     })
     const moonMesh = new THREE.Mesh(moonGeo, moonMat)
     scene.add(moonMesh)
+
+    // Optional live NASA Moon Trek WMTS Global LRO WAC Mosaic (1024x512 zoom-1 tiles, CORS enabled)
+    let isDisposed = false
+    let nasaWacPixels: Uint8ClampedArray | null = null
+    const nasaWacWidth = 1024
+    const nasaWacHeight = 512
+
+    function sampleNasaWacLuma(lat: number, lon: number): number | null {
+      if (!nasaWacPixels) return null
+      const u = ((((lon + 180) / 360) % 1) + 1) % 1
+      const v = THREE.MathUtils.clamp((90 - lat) / 180, 0, 1)
+      const fx = u * (nasaWacWidth - 1)
+      const fy = v * (nasaWacHeight - 1)
+      const x0 = Math.floor(fx)
+      const y0 = Math.floor(fy)
+      const x1 = (x0 + 1) % nasaWacWidth
+      const y1 = Math.min(y0 + 1, nasaWacHeight - 1)
+      const tx = fx - x0
+      const ty = fy - y0
+      const lumAt = (px: number, py: number) => {
+        const idx = (py * nasaWacWidth + px) * 4
+        return (
+          (0.299 * nasaWacPixels![idx] +
+            0.587 * nasaWacPixels![idx + 1] +
+            0.114 * nasaWacPixels![idx + 2]) /
+          255
+        )
+      }
+      const l00 = lumAt(x0, y0)
+      const l10 = lumAt(x1, y0)
+      const l01 = lumAt(x0, y1)
+      const l11 = lumAt(x1, y1)
+      return (l00 * (1 - tx) + l10 * tx) * (1 - ty) + (l01 * (1 - tx) + l11 * tx) * ty
+    }
+
+    function applyMoonGlobeColors() {
+      if (!nasaWacPixels) return
+      const cAttr = moonGeo.attributes.color as THREE.BufferAttribute
+      const arr = cAttr.array as Float32Array
+      const useNasa = Boolean(nasaWacPixels && latestPropsRef.current.useNasaTrekImagery !== false)
+      if (!useNasa) {
+        arr.set(baseProceduralColors)
+      } else {
+        for (let i = 0; i < posAttr.count; i++) {
+          const luma = sampleNasaWacLuma(moonUnitLatLon[i * 2], moonUnitLatLon[i * 2 + 1])
+          if (luma !== null) {
+            const c = THREE.MathUtils.clamp(0.24 + luma * 0.64, 0.24, 0.88)
+            arr[i * 3] = c * 0.97
+            arr[i * 3 + 1] = c * 0.98
+            arr[i * 3 + 2] = c * 1.01
+          }
+        }
+      }
+      cAttr.needsUpdate = true
+      const prevCenter = lastProcCenterUnit.lengthSq() > 0.5 ? lastProcCenterUnit.clone() : focusUnit
+      lastProcCenterUnit.set(0, 0, 0)
+      rebuildProceduralPatch(prevCenter)
+    }
+
+    ;(function loadNasaMoonTrekWacMosaic() {
+      latestPropsRef.current.onNasaImageryStatusChange?.('loading')
+      const canvas = document.createElement('canvas')
+      canvas.width = nasaWacWidth
+      canvas.height = nasaWacHeight
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        latestPropsRef.current.onNasaImageryStatusChange?.('offline')
+        return
+      }
+      const tileJobs: Promise<void>[] = []
+      for (let ty = 0; ty < 2; ty++) {
+        for (let tx = 0; tx < 4; tx++) {
+          tileJobs.push(
+            new Promise((resolve, reject) => {
+              const img = new Image()
+              img.crossOrigin = 'anonymous'
+              img.onload = () => {
+                if (!isDisposed) ctx.drawImage(img, tx * 256, ty * 256, 256, 256)
+                resolve()
+              }
+              img.onerror = () => reject(new Error(`NASA Moon Trek tile ${ty}/${tx} failed`))
+              img.src = `https://trek.nasa.gov/tiles/Moon/EQ/LRO_WAC_Mosaic_Global_303ppd_v02/1.0.0/default/default028mm/1/${ty}/${tx}.jpg`
+            }),
+          )
+        }
+      }
+      Promise.all(tileJobs)
+        .then(() => {
+          if (isDisposed) return
+          nasaWacPixels = ctx.getImageData(0, 0, nasaWacWidth, nasaWacHeight).data
+          applyMoonGlobeColors()
+          latestPropsRef.current.onNasaImageryStatusChange?.('loaded')
+        })
+        .catch(() => {
+          if (!isDisposed) latestPropsRef.current.onNasaImageryStatusChange?.('offline')
+        })
+    })()
 
     // Polar Coordinate Graticule
     const graticuleGroup = new THREE.Group()
@@ -609,7 +728,14 @@ export function LunarStage3D({
           pAttr.setXYZ(idx, sampleUnit.x * r, sampleUnit.y * r, sampleUnit.z * r)
 
           const microGrain = fbm3D(sampleUnit.x * 26, sampleUnit.y * 26, sampleUnit.z * 26, 2) * 0.08
-          const albedo = THREE.MathUtils.clamp(0.56 + blended * 10.5 + microGrain, 0.34, 0.86)
+          let albedo = THREE.MathUtils.clamp(0.56 + blended * 10.5 + microGrain, 0.34, 0.86)
+          if (nasaWacPixels && latestPropsRef.current.useNasaTrekImagery !== false) {
+            const { lat, lon } = unitVecToLatLon(sampleUnit)
+            const luma = sampleNasaWacLuma(lat, lon)
+            if (luma !== null) {
+              albedo = THREE.MathUtils.clamp(0.24 + luma * 0.64 + microGrain * 0.35, 0.24, 0.88)
+            }
+          }
           cAttr.setXYZ(idx, albedo * 0.96, albedo * 0.97, albedo * 1.01)
           idx++
         }
@@ -723,6 +849,10 @@ export function LunarStage3D({
       targetTheta: 0.25,
       phi: Math.PI * 0.78,
       targetPhi: Math.PI * 0.78,
+      localAzimuth: -0.38,
+      targetLocalAzimuth: -0.38,
+      localPitch: 0.30,
+      targetLocalPitch: 0.30,
       alpha: 0,
       lookAtCurrent: new THREE.Vector3(0, 0, 0),
       isDragging: false,
@@ -734,6 +864,8 @@ export function LunarStage3D({
 
     const focusUnit = latLonToUnitVec(-89.46315775697231, -137.50198490762307)
     const selectedUnit = focusUnit.clone()
+    const activeOriginWorld = new THREE.Vector3()
+    let prevAlphaBucket = -1
     let clickedDemEnu: { siteId: string; eastM: number; yRel: number; southM: number } | null = null
     let activeDemRenderedKey = ''
 
@@ -809,7 +941,7 @@ export function LunarStage3D({
         const yU = dem.positions[i * 3 + 1]
         const zS = dem.positions[i * 3 + 2]
         const innerPt = enuMetersToSceneVec(xE, yU, zS, dem, frame, vScale)
-        const outerPt = enuMetersToSceneVec(xE * 2.4, midRelY - 120, zS * 2.4, dem, frame, vScale)
+        const outerPt = enuMetersToSceneVec(xE * 3.6, midRelY - 145, zS * 3.6, dem, frame, vScale)
 
         ringPositions[idx * 6 + 0] = innerPt.x
         ringPositions[idx * 6 + 1] = innerPt.y
@@ -822,9 +954,9 @@ export function LunarStage3D({
         ringColors[idx * 6 + 0] = colors[i * 3] * 0.9
         ringColors[idx * 6 + 1] = colors[i * 3 + 1] * 0.9
         ringColors[idx * 6 + 2] = colors[i * 3 + 2] * 0.9
-        ringColors[idx * 6 + 3] = 0.03
-        ringColors[idx * 6 + 4] = 0.035
-        ringColors[idx * 6 + 5] = 0.045
+        ringColors[idx * 6 + 3] = 0.008
+        ringColors[idx * 6 + 4] = 0.009
+        ringColors[idx * 6 + 5] = 0.012
 
         const nextIdx = (idx + 1) % ringCoords.length
         const a = idx * 2
@@ -895,6 +1027,7 @@ export function LunarStage3D({
       }
 
       if (!activeSel) {
+        activeOriginWorld.set(0, 0, 0)
         markerGroup.visible = false
         landerGroup.visible = false
         earthLosLine.visible = false
@@ -904,7 +1037,7 @@ export function LunarStage3D({
       }
 
       let originWorld: THREE.Vector3
-      if (dem && camState.alpha > 0.2) {
+      if (dem) {
         const demFrame = getLocalTangentFrame(
           latLonToUnitVec(dem.metadata.coordinates.latitude_deg, dem.metadata.coordinates.longitude_deg),
         )
@@ -938,6 +1071,7 @@ export function LunarStage3D({
         const r = MOON_RADIUS + getSphericalElevationOffset(selectedUnit, true) * 1.8 + 0.006
         originWorld = selectedUnit.clone().multiplyScalar(r)
       }
+      activeOriginWorld.copy(originWorld)
 
       markerGroup.visible = true
       markerGroup.position.copy(originWorld)
@@ -1013,25 +1147,41 @@ export function LunarStage3D({
         clickedDemEnu = null
         camState.targetPhi = THREE.MathUtils.clamp(Math.acos(THREE.MathUtils.clamp(u.y, -1, 1)), 0.14, Math.PI - 0.04)
         camState.targetTheta = Math.atan2(u.x, u.z)
-        camState.targetRadius = surfaceMode ? 2.66 : 6.4
+        if (surfaceMode) {
+          const isHorizon = latestPropsRef.current.surfacePreset === 'HORIZON'
+          camState.targetRadius = isHorizon ? 2.28 : 2.46
+          camState.targetLocalPitch = isHorizon ? 0.13 : 0.30
+        } else {
+          camState.targetRadius = 6.4
+        }
         rebuildProceduralPatch(focusUnit)
         rebuildDemMesh()
         updateMarkersAndLights()
       },
       setMode(mode: 'ORBITAL' | 'SURFACE') {
         if (mode === 'SURFACE') {
+          const isHorizon = latestPropsRef.current.surfacePreset === 'HORIZON'
           camState.targetPhi = THREE.MathUtils.clamp(
             Math.acos(THREE.MathUtils.clamp(selectedUnit.y, -1, 1)),
             0.14,
             Math.PI - 0.04,
           )
           camState.targetTheta = Math.atan2(selectedUnit.x, selectedUnit.z)
-          camState.targetRadius = 2.66
+          camState.targetRadius = isHorizon ? 2.28 : 2.46
+          camState.targetLocalPitch = isHorizon ? 0.13 : 0.30
         } else {
           camState.targetRadius = 7.2
           camState.targetPhi = Math.PI * 0.78
         }
       },
+      setSurfacePreset(preset: SurfaceCameraPreset) {
+        camState.targetLocalPitch = preset === 'HORIZON' ? 0.13 : 0.30
+        camState.targetRadius = preset === 'HORIZON' ? 2.28 : 2.46
+      },
+      nudgeSurfaceAzimuth(deltaRad: number) {
+        camState.targetLocalAzimuth += deltaRad
+      },
+      applyMoonGlobeColors,
       rebuildDemMesh,
       updateMarkersAndLights,
     }
@@ -1165,10 +1315,15 @@ export function LunarStage3D({
       camState.movedDistance += Math.hypot(dx, dy)
       if (camState.movedDistance > 4) container.style.cursor = 'grabbing'
 
-      const altFactor = THREE.MathUtils.clamp((camState.targetRadius - 2.05) / 5.2, 0.06, 1.2)
-      const rotateSpeed = 0.0055 * altFactor
-      camState.targetTheta -= dx * rotateSpeed
-      camState.targetPhi = THREE.MathUtils.clamp(camState.targetPhi - dy * rotateSpeed, 0.08, Math.PI - 0.03)
+      if (camState.alpha > 0.45) {
+        camState.targetLocalAzimuth -= dx * 0.0065
+        camState.targetLocalPitch = THREE.MathUtils.clamp(camState.targetLocalPitch + dy * 0.0055, 0.06, 1.28)
+      } else {
+        const altFactor = THREE.MathUtils.clamp((camState.targetRadius - 2.05) / 5.2, 0.06, 1.2)
+        const rotateSpeed = 0.0055 * altFactor
+        camState.targetTheta -= dx * rotateSpeed
+        camState.targetPhi = THREE.MathUtils.clamp(camState.targetPhi - dy * rotateSpeed, 0.08, Math.PI - 0.03)
+      }
     }
 
     const onPointerUp = (e: PointerEvent) => {
@@ -1184,7 +1339,7 @@ export function LunarStage3D({
       e.preventDefault()
       const closeness = THREE.MathUtils.clamp((camState.targetRadius - 2.15) / 5.0, 0.22, 1.2)
       const zoomFactor = 1 + e.deltaY * 0.00105 * closeness
-      camState.targetRadius = THREE.MathUtils.clamp(camState.targetRadius * zoomFactor, 2.34, 11.2)
+      camState.targetRadius = THREE.MathUtils.clamp(camState.targetRadius * zoomFactor, 2.18, 11.2)
     }
 
     let initialPinchDist: number | null = null
@@ -1205,7 +1360,7 @@ export function LunarStage3D({
           e.touches[0].clientY - e.touches[1].clientY,
         )
         const scale = initialPinchDist / Math.max(dist, 1)
-        camState.targetRadius = THREE.MathUtils.clamp(initialPinchRadius * scale, 2.34, 11.2)
+        camState.targetRadius = THREE.MathUtils.clamp(initialPinchRadius * scale, 2.18, 11.2)
       }
     }
     const onTouchEnd = () => {
@@ -1233,8 +1388,14 @@ export function LunarStage3D({
 
     const clock = new THREE.Clock()
     const zeroVec = new THREE.Vector3(0, 0, 0)
+    const worldUp = new THREE.Vector3(0, 1, 0)
     const gazeUnit = new THREE.Vector3()
     const desiredLookAt = new THREE.Vector3()
+    const orbitalCamPos = new THREE.Vector3()
+    const surfaceTargetPos = new THREE.Vector3()
+    const horizDir = new THREE.Vector3()
+    const surfaceCamPos = new THREE.Vector3()
+    const upTransition = new THREE.Vector3()
     let rafId = 0
 
     const animate = () => {
@@ -1244,10 +1405,18 @@ export function LunarStage3D({
       camState.radius += (camState.targetRadius - camState.radius) * 0.085
       camState.theta += (camState.targetTheta - camState.theta) * 0.085
       camState.phi += (camState.targetPhi - camState.phi) * 0.085
+      camState.localAzimuth += (camState.targetLocalAzimuth - camState.localAzimuth) * 0.09
+      camState.localPitch += (camState.targetLocalPitch - camState.localPitch) * 0.09
 
       const rawAlpha = THREE.MathUtils.clamp((3.7 - camState.radius) / 0.72, 0, 1)
       const alpha = rawAlpha * rawAlpha * (3 - 2 * rawAlpha)
       camState.alpha = alpha
+
+      const alphaBucket = alpha < 0.15 ? 0 : alpha < 0.4 ? 1 : 2
+      if (alphaBucket !== prevAlphaBucket) {
+        prevAlphaBucket = alphaBucket
+        updateMarkersAndLights()
+      }
 
       const nextMode: 'ORBITAL' | 'SURFACE' = alpha > 0.5 ? 'SURFACE' : 'ORBITAL'
       if (nextMode !== camState.reportedMode) {
@@ -1270,11 +1439,13 @@ export function LunarStage3D({
       if (useRealDem) {
         rebuildDemMesh()
         demMesh.visible = true
+        demMat.transparent = alpha < 0.995
         demMat.opacity = alpha
         demSkirtMesh.visible = true
+        demSkirtMat.transparent = alpha < 0.995
         demSkirtMat.opacity = alpha * 0.92
         demFrameLine.visible = true
-        demFrameMat.opacity = alpha * 0.42
+        demFrameMat.opacity = alpha * 0.28
         procPatchMesh.visible = false
 
         // Smoothly fade macro sphere out in surface view so zero sphere facets ever clip DEM valleys
@@ -1303,19 +1474,49 @@ export function LunarStage3D({
       })
       beaconGroup.visible = alpha < 0.72
 
-      camera.position.copy(gazeUnit).multiplyScalar(camState.radius)
+      orbitalCamPos.copy(gazeUnit).multiplyScalar(camState.radius)
 
       const targetUnit = activeSel ? selectedUnit : gazeUnit
       const targetBaseR = useRealDem
         ? MOON_RADIUS + 0.065
         : MOON_RADIUS + getSphericalElevationOffset(targetUnit, true) * 1.8
-      desiredLookAt.copy(targetUnit).multiplyScalar(targetBaseR)
+      const surfFrame = getLocalTangentFrame(targetUnit)
 
-      const closeObliqueFactor = THREE.MathUtils.clamp((3.1 - camState.radius) / 0.75, 0, 1) * alpha
-      if (closeObliqueFactor > 0.001) {
-        const { north } = getLocalTangentFrame(gazeUnit)
-        camera.position.addScaledVector(north, -0.15 * closeObliqueFactor)
+      if (activeSel && activeOriginWorld.lengthSq() > 0.1) {
+        surfaceTargetPos.copy(activeOriginWorld)
+      } else {
+        surfaceTargetPos.copy(targetUnit).multiplyScalar(targetBaseR)
       }
+
+      const lookAtLift = THREE.MathUtils.lerp(
+        0.022,
+        0.006,
+        THREE.MathUtils.clamp((camState.localPitch - 0.1) / 0.6, 0, 1),
+      )
+      desiredLookAt.copy(surfaceTargetPos).addScaledVector(surfFrame.up, lookAtLift)
+
+      horizDir
+        .copy(surfFrame.north)
+        .multiplyScalar(-Math.cos(camState.localAzimuth))
+        .addScaledVector(surfFrame.east, -Math.sin(camState.localAzimuth))
+        .normalize()
+
+      const surfDist = Math.max(0.11, (camState.radius - MOON_RADIUS) * 0.62)
+      const pitch = THREE.MathUtils.clamp(camState.localPitch, 0.06, 1.28)
+      surfaceCamPos
+        .copy(surfaceTargetPos)
+        .addScaledVector(horizDir, surfDist * Math.cos(pitch))
+        .addScaledVector(surfFrame.up, surfDist * Math.sin(pitch) + 0.01)
+
+      camera.position.lerpVectors(orbitalCamPos, surfaceCamPos, alpha)
+
+      upTransition
+        .copy(worldUp)
+        .multiplyScalar(1 - alpha)
+        .addScaledVector(surfFrame.up, alpha)
+        .addScaledVector(horizDir, -0.38 * Math.sin(alpha * Math.PI))
+        .normalize()
+      camera.up.copy(upTransition)
 
       camState.lookAtCurrent.lerpVectors(zeroVec, desiredLookAt, alpha)
       camera.lookAt(camState.lookAtCurrent)
@@ -1331,6 +1532,7 @@ export function LunarStage3D({
     animate()
 
     return () => {
+      isDisposed = true
       cancelAnimationFrame(rafId)
       domElem.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('pointermove', onPointerMove)
@@ -1396,6 +1598,16 @@ export function LunarStage3D({
   useEffect(() => {
     cameraControlsRef.current?.setMode(desiredCameraMode)
   }, [desiredCameraMode, cameraPresetNonce])
+
+  useEffect(() => {
+    if (desiredCameraMode === 'SURFACE') {
+      cameraControlsRef.current?.setSurfacePreset(surfacePreset)
+    }
+  }, [surfacePreset, desiredCameraMode])
+
+  useEffect(() => {
+    cameraControlsRef.current?.applyMoonGlobeColors()
+  }, [useNasaTrekImagery])
 
   useEffect(() => {
     cameraControlsRef.current?.rebuildDemMesh()
