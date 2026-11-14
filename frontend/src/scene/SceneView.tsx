@@ -13,12 +13,13 @@ export type SceneViewProps = {
   terrain: TerrainMeshData;
   sun: BodyDirection;
   earth: BodyDirection;
-  dataKind: 'synthetic' | 'cached_real' | 'live_real';
+  dataKind: 'synthetic' | 'cached_real' | 'live_real' | 'unverified';
   verticalScale?: number;
   wireframe?: boolean;
   cameraPreset?: 'overview' | 'surface';
   resetKey?: number;
   observerHeightM?: number;
+  showCelestial?: boolean;
 };
 
 class SceneBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -101,8 +102,11 @@ function BodyMarker({ direction, radius, ground, color, size }: {
 }
 
 function Content({ terrain, sun, earth, verticalScale = 10, wireframe = false,
-  cameraPreset = 'overview', resetKey = 0, observerHeightM = 2 }: SceneViewProps) {
-  const sunlight = azElToSceneDirection(sun.azimuth_deg, sun.elevation_deg);
+  cameraPreset = 'overview', resetKey = 0, observerHeightM = 2, showCelestial = true, dataKind }: SceneViewProps) {
+  const celestialEnabled = showCelestial && dataKind !== 'unverified';
+  const sunlight = celestialEnabled
+    ? azElToSceneDirection(sun.azimuth_deg, sun.elevation_deg)
+    : { x: .5, y: 1, z: .5 };
   const ground = (terrain.groundY ?? 0) * verticalScale;
   const observerY = ground + observerHeightM;
   const lightTarget = useMemo(() => {
@@ -117,9 +121,9 @@ function Content({ terrain, sun, earth, verticalScale = 10, wireframe = false,
     <directionalLight target={lightTarget} position={[sunlight.x * 2000, observerY + sunlight.y * 2000, sunlight.z * 2000]} intensity={1.8} />
     <Terrain terrain={terrain} verticalScale={verticalScale} wireframe={wireframe} />
     {terrain.groundY !== null && <Lander groundY={ground} />}
-    <BodyMarker direction={sun} radius={terrain.span * .65} ground={observerY} color="#ffd18a" size={13} />
-    <BodyMarker direction={earth} radius={terrain.span * .55} ground={observerY} color="#78bdff" size={15} />
-    <axesHelper args={[terrain.span * .18]} position={[0, ground, 0]} />
+    {celestialEnabled && <BodyMarker direction={sun} radius={terrain.span * .65} ground={observerY} color="#ffd18a" size={13} />}
+    {celestialEnabled && <BodyMarker direction={earth} radius={terrain.span * .55} ground={observerY} color="#78bdff" size={15} />}
+    {celestialEnabled && <axesHelper args={[terrain.span * .18]} position={[0, ground, 0]} />}
     <CameraControls terrain={terrain} verticalScale={verticalScale} preset={cameraPreset} resetKey={resetKey} />
   </>;
 }
@@ -134,7 +138,7 @@ export function SceneView(props: SceneViewProps) {
       </Canvas>
     </SceneBoundary>
     <span style={{ position: 'absolute', top: 16, left: 16, background: '#0b1525dd', color: '#e5ecf5', padding: '8px 12px', borderRadius: 6, fontSize: 12, pointerEvents: 'none' }}>
-      {props.dataKind === 'synthetic' ? 'SYNTHETIC DATA' : 'DATA VISUALIZATION'} · illustrative lighting
+      {props.dataKind === 'synthetic' ? 'SYNTHETIC DATA' : props.dataKind === 'unverified' ? 'UNVERIFIED TERRAIN · NO CELESTIAL OVERLAYS' : 'DATA VISUALIZATION'} · illustrative lighting
     </span>
   </div>;
 }

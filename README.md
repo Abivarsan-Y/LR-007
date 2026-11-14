@@ -1,40 +1,43 @@
 # HORIZON OPS — LR-007
 
-Lunar Landing Site, Mission Window & LunaDiff Navigator. The source of truth for scope is [the master plan](notes/master_plan.md).
+Lunar Landing Site, Mission Window & LunaDiff Navigator. Scope follows [the master plan](notes/master_plan.md).
 
-## Current work: D foundation
+## Current implementation
 
-This branch replaces the earlier learning dashboard and Python health server with Person D's initial contracts, synthetic fixtures, scene direction adapter, and CI. A owns the real API/science, B owns terrain processing, C owns the frontend application, and D owns shared contracts, 3D and delivery.
+- A: FastAPI health endpoint and a Horizons ephemeris client with verified real-response cache replay; analysis endpoints are not wired yet.
+- B: terrain ingestion and four JSON grid exports. Their orientation, height-reference metadata and site-elevation agreement need validation before scientific combination.
+- C/D: mission dashboard with embedded React Three Fiber terrain scene, camera controls, site-grid switching and a separate synthetic direction timeline.
+- D: draft shared JSON contracts, synthetic fixtures, loaders, validation tests and CI.
 
-**A standalone 3D scene preview is implemented. NASA calculations, real terrain analysis, landing recommendations and the final mission dashboard are not implemented here.** All example numbers are synthetic. Prior learning code remains recoverable in Git history at `69ffee8` and on the old `jahsan/lunar-mvp` branch.
+The default dashboard displays exported terrain for **unverified inspection only**, with neutral lighting and celestial overlays hidden. A separate synthetic mode drives the Sun/Earth markers with three explicit fixture samples. Telemetry remains synthetic and static. No terrain-aware visibility, certified landing safety, real scenario comparison or scientific shadow result is produced by this integration.
 
-## Validate locally
+## Run the dashboard
 
-Requires Python 3.10+ and Node 24 (CI uses Python 3.14).
+Requires Node 24 and npm. From the repo root:
 
 ```sh
+npm --prefix frontend ci
+npm --prefix frontend run dev
+```
+
+Open Vite's printed local URL. The preview requires no Python process or NASA requests. See [frontend instructions](frontend/README.md) for modes, state flow and manual checks. The [standalone D scene](frontend/src/scene/README.md) remains available independently.
+
+## Checks
+
+```sh
+npm --prefix frontend test
+npm --prefix frontend run build
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements-dev.txt
 python scripts/validate_fixtures.py
 python -m unittest discover -s tests -v
-npm --prefix frontend/src/scene ci
-npm --prefix frontend/src/scene test
-npm --prefix frontend/src/scene run build
 ```
 
-The virtual environment isolates the validation dependency from your system Python. The validator checks JSON structure, timestamps, basic cross-field rules and terrain checksum/byte count. Tests deliberately reject invalid data. Scene tests verify cardinal directions, grid decoding, checksum rejection and nodata handling; the build also type-checks the React scene.
+These checks validate UI compilation, scene geometry/directions, adapter rules and synthetic contracts. They do not validate astronomy or certify terrain science. Backend setup and science tests are documented separately in [backend/README.md](backend/README.md).
 
-Run D's independent preview with `npm --prefix frontend/src/scene run dev`, then open the printed local address on port 5174. See [the scene guide](frontend/src/scene/README.md) for controls and component integration. Person C still owns the main frontend application; this preview does not create its scaffold. Stop any old Vite/Python processes left running from the learning prototype.
+## Integration boundaries
 
-## Layout
+A owns astronomy/API; B owns terrain processing; C owns the mission frontend; D owns the scene, shared formats and delivery checks. See [contract conventions](docs/contracts.md). The B-format adapter supports inspection without overwriting producer metadata; real terrain and ephemerides must use the same verified site coordinates, observer elevation and coordinate conventions.
 
-- `contracts/`: five draft JSON Schema 2020-12 contracts.
-- `data/fixtures/`: synthetic examples, including a 64×64 little-endian float32 crater grid (16 KiB).
-- `scripts/validate_fixtures.py`: schema and integration checks.
-- `tests/`: positive and negative contract tests.
-- `frontend/src/scene/`: React Three Fiber component, terrain decoder, direction utility, tests and isolated preview.
-- `.github/workflows/`: automated contract and direction checks.
-- `docs/contracts.md`: conventions, fixture meaning and handoff instructions.
-
-The formats are **draft version 0.1.0**, ready for producer/consumer review. They are not claimed to be team-approved or frozen. This CI only checks D's current foundation; API/main-frontend checks will be added when those applications exist. The independent scene preview already has tests and a build check.
+The source documents in `notes/` are preserved. The original learning dashboard/health server remain recoverable at commit `69ffee8` in Git history.

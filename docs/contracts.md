@@ -42,3 +42,11 @@ For row `r`, column `c`: `x=(c-(width-1)/2)*spacing`, `z=(r-(height-1)/2)*spacin
 The validator rejects malformed schema data, invalid UTC/MET alignment, reversed intervals, unknown-horizon visibility, missing real-source attribution and corrupted binary assets. It does not validate terrain science, orbital calculations, metric physics or every relationship between separate documents. Passing these checks is an interface guarantee within these limits.
 
 D's standalone terrain preview now consumes the synthetic grid and analysis. See `frontend/src/scene/README.md` for its component interface, controls and limitations. It displays an explicit synthetic-data label. Next: review formats with A/B/C, expand negative/unknown fixtures, and wire checks into their applications. Real offline demo assets will be prepared separately from these fixtures.
+
+## B JSON compatibility (inspection only)
+
+`frontend/src/scene/terrain-json.mjs` accepts B's existing `schema_version: "1.0"` JSON exports with inline `heights`, `grid`, `observer` and `lat_deg`/`lon_deg` coordinates. This is a separate display adapter; it does not declare those exports compliant with the binary v0.1.0 scientific contract.
+
+It validates dimensions, spacing, coordinate ranges, observer indices and height counts. Null samples remain holes. It uses `observer.grid_x/grid_y` to anchor the display to the sampled grid height, preserving the nominal site elevation and reporting the difference. The original JSON is never modified. Longitude normalization is diagnostic only, not a frame transformation.
+
+Grid axes are preserved for inspection and are not asserted to be ENU. The adapter sets `orientationVerified: false` for all current exports. In the integrated scene, `dataKind="unverified"` disables celestial overlays and uses neutral illustrative lighting. Missing frame, height reference, provenance and grid orientation must be agreed with B before scientific combination. Source nodata already filled by the producer cannot be recovered by this adapter.
