@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "Bundler", "jsx": "react-jsx",
+    "strict": true, "skipLibCheck": true, "allowJs": true, "checkJs": false,
+    "allowImportingTsExtensions": true, "resolveJsonModule": true, "noEmit": true
+  },
+  "include": ["*.tsx", "*.mjs", "preview-app/**/*.tsx", "preview-app/**/*.d.ts"],
+  "exclude": ["*.test.mjs", "vite.config.mjs", "node_modules", "dist"]
+}
