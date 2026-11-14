@@ -31,36 +31,7 @@ At the lunar south pole, the Sun never rises high—it creeps along the horizon 
 
 ## 2. System Architecture & Component Mapping
 
-```mermaid
-flowchart TD
-    subgraph Data & Ephemerides [NASA Sources & Data Ingestion]
-        LOLA["NASA LOLA Polar DEMs (PGDA/GSFC)"] --> B_Ingest["Person B: DEM Preprocessor & Regional Grid"]
-        JPL["NASA JPL Horizons Ephemeris"] --> A_Ephem["Person A: Sun & Earth Vector Cache"]
-        D_Schema["Person D: JSON Schemas & Fixtures"] --> SharedFixtures[("contracts/ & data/fixtures/\n(Zero-Blocker Parallel Cache)")]
-    end
-
-    subgraph Scientific Backend [Python 3.14 + FastAPI + NumPy/SciPy]
-        B_Ingest --> B_Slope["Person B: Slope & Safety Engine (<8°)"]
-        B_Ingest --> B_Horizon["Person B: Curvature-Corrected Horizon Profile"]
-        B_Ingest --> B_Recommend["Person B: Nearby Safe Haven Search"]
-        B_Horizon & A_Ephem --> A_Vis["Person A: Visibility Engine (0.53° Penumbra & DTE)"]
-        A_Vis --> A_Metrics["Person A: Mission Metrics Engine"]
-        A_Vis --> A_Diff["Person A: LunaDiff Engine (A/B Deltas & Causal Text)"]
-        A_Diff & B_Recommend --> A_API["Person A: FastAPI Endpoints (/api/sites, /api/diff, /api/recommend)"]
-    end
-
-    subgraph Frontend Client [React + Vite + TypeScript + Tailwind CSS]
-        SharedFixtures -. Phase 1-3 Fixtures .-> C_Shell["Person C: Responsive UI Shell & Scrubber"]
-        A_API -. Phase 4 Live API .-> C_Shell
-        C_Shell --> C_Map["Person C: Interactive 2D Polar Map (Click to Pin)"]
-        C_Shell --> C_DiffUI["Person C: LunaDiff Gained/Lost Inspector"]
-        C_Shell --> C_HorizonChart["Person C: Azimuth Horizon & Celestial Tracks"]
-        B_Ingest --> D_Mesh["Person B: Compact Height-Grid (.bin)"]
-        A_Ephem --> D_Scene["Person D: Three.js 3D Celestial & Surface Viewport"]
-        D_Mesh --> D_Scene
-        D_Scene --> C_Shell
-    end
-```
+![alt text](image.png)
 
 ---
 
