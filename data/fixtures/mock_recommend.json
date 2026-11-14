@@ -1,0 +1,14 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "synthetic",
+    "model_version": "fixture-0.1.0",
+    "sources": [],
+    "assumptions": [
+      "Artificial test data; not NASA observations or a landing recommendation."
+    ]
+  },
+  "origin_site_id": "synthetic-site",
+  "search_radius_m": 5000,
+  "candidates": []
+}

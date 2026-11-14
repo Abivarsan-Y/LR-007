@@ -1,0 +1,29 @@
+{
+  "schema_version": "0.1.0",
+  "provenance": {
+    "data_kind": "synthetic",
+    "model_version": "fixture-0.1.0",
+    "sources": [],
+    "assumptions": [
+      "Artificial test data; not NASA observations or a landing recommendation."
+    ]
+  },
+  "site_id": "synthetic-site",
+  "asset_path": "data/fixtures/mock_height_grid.bin",
+  "sha256": "ee1dd17cd5e6b6b6222e24fb5f05449d2503af3a5844aa9dcbb70c1966a650d9",
+  "encoding": "float32_le",
+  "width": 64,
+  "height": 64,
+  "spacing_m": 20,
+  "coordinates": {
+    "latitude_deg": -89,
+    "longitude_deg": 0,
+    "elevation_m": 0,
+    "frame": "MOON_ME_DE421",
+    "reference_radius_m": 1737400
+  },
+  "layout": "row_major_north_to_south_west_to_east",
+  "height_reference": "metres_above_reference_sphere",
+  "nodata_encoding": "nan",
+  "scene_axes": "+X east, +Y up, -Z north"
+}

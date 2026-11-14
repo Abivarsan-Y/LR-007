@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horizon-ops:diff:0.1.0",
+  "title": "HORIZON OPS diff draft contract",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "data_kind": {
+          "enum": [
+            "synthetic",
+            "cached_real",
+            "live_real"
+          ]
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "uri",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "data_kind",
+        "model_version",
+        "sources",
+        "assumptions"
+      ],
+      "additionalProperties": false
+    },
+    "scenario_a_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario_b_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "duration_hours": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "alignment": {
+      "const": "mission_elapsed_time"
+    },
+    "delta_convention": {
+      "const": "B_minus_A"
+    },
+    "deltas": {
+      "type": "object",
+      "properties": {
+        "sunlight_hours": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_darkness_hours": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "earth_visible_hours": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "sunlight_hours",
+        "max_darkness_hours",
+        "earth_visible_hours"
+      ],
+      "additionalProperties": false
+    },
+    "diagnostic_intervals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "enum": [
+              "GAINED_SUNLIGHT",
+              "LOST_SUNLIGHT",
+              "GAINED_EARTH_VISIBILITY",
+              "LOST_EARTH_VISIBILITY"
+            ]
+          },
+          "start_met_hours": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_met_hours": {
+            "type": "number",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "type",
+          "start_met_hours",
+          "end_met_hours",
+          "reason"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "schema_version",
+    "provenance",
+    "scenario_a_id",
+    "scenario_b_id",
+    "duration_hours",
+    "alignment",
+    "delta_convention",
+    "deltas",
+    "diagnostic_intervals"
+  ],
+  "additionalProperties": false
+}

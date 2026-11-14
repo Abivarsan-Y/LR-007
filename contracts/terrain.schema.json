@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horizon-ops:terrain:0.1.0",
+  "title": "HORIZON OPS terrain draft contract",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "const": "0.1.0"
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "data_kind": {
+          "enum": [
+            "synthetic",
+            "cached_real",
+            "live_real"
+          ]
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "uri": {
+                "type": "string",
+                "format": "uri"
+              },
+              "sha256": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            },
+            "required": [
+              "id",
+              "uri",
+              "sha256"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "required": [
+        "data_kind",
+        "model_version",
+        "sources",
+        "assumptions"
+      ],
+      "additionalProperties": false
+    },
+    "site_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "asset_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "encoding": {
+      "const": "float32_le"
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 2
+    },
+    "spacing_m": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "coordinates": {
+      "type": "object",
+      "properties": {
+        "latitude_deg": {
+          "type": "number",
+          "minimum": -90,
+          "maximum": 90
+        },
+        "longitude_deg": {
+          "type": "number",
+          "minimum": -180,
+          "maximum": 180
+        },
+        "elevation_m": {
+          "type": "number"
+        },
+        "frame": {
+          "const": "MOON_ME_DE421"
+        },
+        "reference_radius_m": {
+          "const": 1737400
+        }
+      },
+      "required": [
+        "latitude_deg",
+        "longitude_deg",
+        "elevation_m",
+        "frame",
+        "reference_radius_m"
+      ],
+      "additionalProperties": false
+    },
+    "layout": {
+      "const": "row_major_north_to_south_west_to_east"
+    },
+    "height_reference": {
+      "const": "metres_above_reference_sphere"
+    },
+    "nodata_encoding": {
+      "const": "nan"
+    },
+    "scene_axes": {
+      "const": "+X east, +Y up, -Z north"
+    }
+  },
+  "required": [
+    "schema_version",
+    "provenance",
+    "site_id",
+    "asset_path",
+    "sha256",
+    "encoding",
+    "width",
+    "height",
+    "spacing_m",
+    "coordinates",
+    "layout",
+    "height_reference",
+    "nodata_encoding",
+    "scene_axes"
+  ],
+  "additionalProperties": false
+}
