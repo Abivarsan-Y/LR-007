@@ -12,16 +12,37 @@ let viewer, patchPrimitive, patchBounds, patchMode=false, imageryErrors=0;
 const rays=[], gridLines=[];
 let patchImageMaterial, inspection=false;
 const site=metadata.coordinates;
+function setHudExpanded(open){
+  $('hud-body').hidden=!open;
+  $('hud-toggle').setAttribute('aria-expanded',String(open));
+  $('hud-toggle').textContent=open?'Hide details ⌄':'Show details ⌃';
+  $('hud-toggle').title=open?'Hide observer details':'Show observer details';
+}
+$('hud-toggle').onclick=()=>setHudExpanded($('hud-body').hidden);
+document.addEventListener('keydown',event=>{
+  if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;
+  if(event.key.toLowerCase()==='h')setHudExpanded($('hud-body').hidden);
+});
 function status(message){$('imagery-status').textContent=message;}
 function point(lon,lat,h=0){return C.Cartesian3.fromDegrees(lon,lat,h,moon);}
 function mark(lat,lon,label='Selected lunar coordinate'){
   viewer.entities.removeById('selection');
   viewer.entities.add({id:'selection',position:point(lon,lat,patchMode?site.elevation_m+2:0),point:{pixelSize:10,color:C.Color.AQUAMARINE,outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY}});
   $('selection').textContent=`${label}: ${lat.toFixed(6)}° N, ${lon.toFixed(6)}° E. ${patchMode?'Fixed recorded observer.':'Position on reference sphere; elevation not sampled.'}`;
+  $('hud-title').textContent=patchMode?'Connecting Ridge · Site01':'Selected lunar coordinate';
+  $('location-title').textContent=patchMode?'Connecting Ridge · Site01':`${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
+  setHudExpanded(true);
   $('latitude').value=String(lat);$('longitude').value=String(lon);
 }
 function selectMode(local){
   patchMode=local;viewer.scene.globe.show=!local;
+  $('hud-title').textContent=local?'Connecting Ridge · Site01':'The Moon, in context.';
+  $('data-badge').textContent=local?'CACHED REAL · 2 M':'IMAGERY VIEW';
+  const formatHours=value=>value===null?'Unknown':`${value.toFixed(1)} h`;
+  $('metric-sun').textContent=local?formatHours(analysis.metrics.sunlight_hours):'—';
+  $('metric-earth').textContent=local?(analysis.metrics.earth_visible_fraction===null?'Unknown':`${(analysis.metrics.earth_visible_fraction*100).toFixed(1)}%`):'—';
+  $('metric-darkness').textContent=local?formatHours(analysis.metrics.max_darkness_hours):'—';
+  setHudExpanded(local);
   if(!local)viewer.camera.lookAtTransform(C.Matrix4.IDENTITY);
   $('mesh').disabled=!local;for(const line of gridLines)line.show=local&&inspection;
   if(patchPrimitive)patchPrimitive.show=local;
@@ -99,7 +120,7 @@ async function init(){
     const picked=viewer.camera.pickEllipsoid(event.position,moon);if(!picked)return;
     const cart=moon.cartesianToCartographic(picked);mark(C.Math.toDegrees(cart.latitude),C.Math.toDegrees(cart.longitude));
   },C.ScreenSpaceEventType.LEFT_CLICK);
-  $('coordinate-form').addEventListener('submit',event=>{event.preventDefault();try{const {lat,lon}=validateCoordinate(Number($('latitude').value),Number($('longitude').value));selectMode(false);mark(lat,lon);go(lon,lat,150000);}catch(error){$('selection').textContent=error.message;}});
+  $('coordinate-form').addEventListener('submit',event=>{event.preventDefault();try{const {lat,lon}=validateCoordinate(Number($('latitude').value),Number($('longitude').value));selectMode(false);mark(lat,lon);$('location-search').open=false;go(lon,lat,150000);}catch(error){$('selection').textContent=error.message;}});
   $('globe').onclick=()=>{selectMode(false);go(0,-15,RADIUS*3);};
   $('pole').onclick=()=>{selectMode(false);go(site.longitude_deg,-89.9,1500000);};
   $('site').onclick=()=>{selectMode(false);mark(site.latitude_deg,site.longitude_deg,'Canonical Connecting Ridge observer');go(site.longitude_deg,site.latitude_deg,35000);};

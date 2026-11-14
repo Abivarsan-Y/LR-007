@@ -57,3 +57,11 @@ Next adoption step: compare this prototype with the main `LunarStage3D` on the t
 - Project inputs: `data/processed/site01_connecting_ridge_terrain.json` and `backend/tests/fixtures/science/site01/analysis_nominal.json`.
 
 On-screen Cesium and NASA/GSFC/ASU/LROC credits are preserved. The engine's open-source license is separate from attribution and usage conditions for individual datasets or hosted services. No permission to redistribute a complete hosted service or bulk-download its tiles is assumed.
+
+## Main-app visual design adaptation
+
+The experiment now follows the main frontend's full-screen dark globe, floating search, right-side view controls and collapsible glass observation panel. The main frontend itself is unchanged. The panel opens on selection; use **Show details / Hide details** or H while not editing a field to toggle it. Data-source information stays available in its disclosure, and vendor attribution remains visible.
+
+Local Site01 mode shows three recorded 14-day metrics with explicit units. Arbitrary globe coordinates show dashes, disable the recorded direction controls, and do not inherit the Site01 results. Coordinate search accepts latitude and east longitude; selecting an arbitrary point returns to the reference-sphere view. The narrow layout stacks the HUD contents while retaining a full-screen map and scrollable detail body.
+
+QA covered desktop/mobile layouts, local terrain selection, show/hide details, the recorded timeline, and entering (0,0) to verify that the Site01 metrics clear rather than follow an unrelated coordinate. This is a visual adaptation and does not implement the main app's full scenario-analysis interface.
