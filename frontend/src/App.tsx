@@ -32,11 +32,11 @@ import {
 import type { CatalogSiteEntry, LoadedSiteWorkspace } from './api/types'
 import { HorizonProfileCanvas } from './features/analysis/HorizonProfileCanvas'
 import {
-  LunarStage3D,
+  CesiumLunarStage,
   type SurfaceCameraPreset,
   type SurfacePickEvent,
   type TerrainOverlayMode,
-} from './features/map/LunarStage3D'
+} from './features/map/CesiumLunarStage'
 import { PolarMap } from './features/map/PolarMap'
 
 function parseCoordinateQuery(raw: string): { lat: number; lon: number } | null {
@@ -97,6 +97,8 @@ function getExternalLunarLinks(latDeg: number, lonDeg: number) {
 export function App() {
   const [workspace, setWorkspace] = useState<LoadedSiteWorkspace | null>(null)
   const [loadingTarget, setLoadingTarget] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const requestSequence = useRef(0)
   const [observerHeightM, setObserverHeightM] = useState<2 | 5>(2)
   const [sampleIndex, setSampleIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
@@ -136,7 +138,10 @@ export function App() {
 
   const selectCatalogSite = useCallback(
     async (site: CatalogSiteEntry, zoomSurface = true, mastOverride?: 2 | 5) => {
-      const mast = mastOverride ?? observerHeightM
+      const sequence = ++requestSequence.current
+      const mast = site.hasVerifiedAnalysis ? 2 : mastOverride ?? observerHeightM
+      setObserverHeightM(mast)
+      setLoadError('')
       setLoadingTarget(true)
       setDetailsVisible(true)
       setLeftSidebarOpen(true)
@@ -150,10 +155,16 @@ export function App() {
       if (zoomSurface) setDesiredCameraMode('SURFACE')
       setCameraPresetNonce(n => n + 1)
 
-      const loaded = await loadCatalogSiteWorkspace(site, mast)
-      setWorkspace(loaded)
-      setSampleIndex(idx => Math.min(idx, Math.max(loaded.analysis.samples.length - 1, 0)))
-      setLoadingTarget(false)
+      try {
+        const loaded = await loadCatalogSiteWorkspace(site, mast)
+        if (sequence !== requestSequence.current) return
+        setWorkspace(loaded)
+        setSampleIndex(idx => Math.min(idx, Math.max(loaded.analysis.samples.length - 1, 0)))
+      } catch {
+        if (sequence === requestSequence.current) setLoadError('Site data could not load. Select the site again to retry.')
+      } finally {
+        if (sequence === requestSequence.current) setLoadingTarget(false)
+      }
     },
     [observerHeightM],
   )
@@ -181,6 +192,9 @@ export function App() {
       if (zoomSurface) setDesiredCameraMode('SURFACE')
       setCameraPresetNonce(n => n + 1)
 
+      requestSequence.current += 1
+      setLoadingTarget(false)
+      setLoadError('')
       const custom = buildCustomCoordinateWorkspace({
         label,
         latitude_deg: lat,
@@ -196,6 +210,9 @@ export function App() {
   )
 
   const clearSelection = useCallback(() => {
+    requestSequence.current += 1
+    setLoadingTarget(false)
+    setLoadError('')
     setWorkspace(null)
     setPlaying(false)
     setSearchQuery('')
@@ -220,21 +237,12 @@ export function App() {
     [selectCatalogSite, workspace],
   )
 
-  // Handle mast height reload when focused on a catalog site
-  const handleMastToggle = useCallback(
-    async (nextMast: 2 | 5) => {
-      if (nextMast === observerHeightM) return
-      setObserverHeightM(nextMast)
-      if (!workspace) return
-      if (workspace.target.catalogEntry) {
-        setLoadingTarget(true)
-        const reloaded = await loadCatalogSiteWorkspace(workspace.target.catalogEntry, nextMast)
-        setWorkspace(reloaded)
-        setLoadingTarget(false)
-      }
-    },
-    [observerHeightM, workspace],
-  )
+  // Only request heights supported by the selected recorded scenario.
+  const handleMastToggle = useCallback(async (nextMast: 2 | 5) => {
+    if (nextMast === observerHeightM || (nextMast === 5 && workspace?.target.catalogEntry?.hasVerifiedAnalysis)) return
+    setObserverHeightM(nextMast)
+    if (workspace?.target.catalogEntry) await selectCatalogSite(workspace.target.catalogEntry, false, nextMast)
+  }, [observerHeightM, workspace, selectCatalogSite])
 
   // Handle clicks anywhere on the 3D Moon or inside the real 129x129 DEM patch
   const handlePickPoint = useCallback(
@@ -268,6 +276,9 @@ export function App() {
       setDetailsVisible(true)
       setFocusCoords({ latitude_deg: pick.latitude_deg, longitude_deg: pick.longitude_deg })
       setSearchQuery(formatLatLonCompact(pick.latitude_deg, pick.longitude_deg))
+      requestSequence.current += 1
+      setLoadingTarget(false)
+      setLoadError('')
       setWorkspace(
         buildCustomCoordinateWorkspace({
           label: pick.label,
@@ -400,7 +411,7 @@ export function App() {
         }
       default:
         return {
-          label: 'SYNTHETIC EXPLORER',
+          label: 'COORDINATE INSPECTION · NO ANALYSIS',
           cls: 'border-white/15 bg-white/[0.04] text-slate-300',
         }
     }
@@ -430,8 +441,8 @@ export function App() {
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
-      {/* Full-Viewport 3D WebGL Moon (NASA Moon Trek LRO WAC + NASA LOLA 129x129 Binary DEM) */}
-      <LunarStage3D
+      {/* Cesium lunar sphere with streamed LROC imagery and the verified local Site01 grid */}
+      <CesiumLunarStage
         catalogSites={CATALOG_SITES}
         selectedSiteId={workspace?.target.catalogEntry?.id ?? null}
         focusCoordinates={focusCoords}
@@ -442,6 +453,9 @@ export function App() {
         cameraPresetNonce={cameraPresetNonce}
         demTerrain={workspace?.demTerrain ?? null}
         currentSample={currentSample}
+        analysisCoordinates={workspace?.analysis.coordinates ?? null}
+        analysisObserverHeightM={workspace?.analysis.observer_height_m ?? null}
+        analysisDataKind={workspace?.analysis.provenance.data_kind ?? null}
         recommendations={workspace?.recommendations ?? null}
         highlightedCandidateId={highlightedCandidateId}
         overlayMode={overlayMode}
@@ -454,6 +468,7 @@ export function App() {
         onNasaImageryStatusChange={setNasaImageryStatus}
       />
 
+      {loadError && <div role="alert" className="fixed top-20 left-1/2 -translate-x-1/2 z-40 glass-hud rounded-xl p-3 text-xs text-rose-200">{loadError}</div>}
       {/* Top Floating Search & Camera Control Pill */}
       <div
         ref={searchWrapperRef}
@@ -532,7 +547,7 @@ export function App() {
                   ? 'bg-emerald-400/20 text-emerald-300 border border-emerald-400/35'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Angled Oblique 3D Terrain View (17° Pitch)"
+              title="Oblique verified Site01 terrain view"
             >
               OBLIQUE 3D
             </button>
@@ -544,7 +559,7 @@ export function App() {
                   ? 'bg-cyan-400/20 text-cyan-200 border border-cyan-400/35'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Near-Horizontal Lander Perspective (7.5° Pitch)"
+              title="Near-horizontal verified Site01 terrain view"
             >
               HORIZON CAM
             </button>
@@ -567,11 +582,11 @@ export function App() {
             {cameraMode === 'SURFACE' ? surfacePreset : 'ORBITAL'}
           </button>
 
-          {/* NASA Moon Trek LRO WAC Global Mosaic Toggle */}
+          {/* LROC WAC imagery toggle */}
           <button
             type="button"
             onClick={() => setUseNasaTrekImagery(v => !v)}
-            title={`Toggle NASA Moon Trek LRO WAC WMTS Mosaic (${nasaImageryStatus})`}
+            title={`Toggle LROC WAC imagery (${nasaImageryStatus})`}
             className={`shrink-0 px-2 py-1 rounded-full text-[9px] font-mono-tech tracking-[0.12em] uppercase border transition flex items-center gap-1.5 ${
               useNasaTrekImagery
                 ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-200'
@@ -865,7 +880,7 @@ export function App() {
                       : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]'
                   }`}
                 >
-                  OBLIQUE 17°
+                  OBLIQUE
                 </button>
                 <button
                   type="button"
@@ -876,7 +891,7 @@ export function App() {
                       : 'border-white/10 bg-white/[0.03] text-slate-300 hover:bg-white/[0.07]'
                   }`}
                 >
-                  HORIZON 8°
+                  HORIZON
                 </button>
                 <button
                   type="button"
@@ -902,7 +917,8 @@ export function App() {
                       key={h}
                       type="button"
                       onClick={() => void handleMastToggle(h)}
-                      disabled={loadingTarget}
+                      disabled={loadingTarget || (h === 5 && workspace?.target.catalogEntry?.hasVerifiedAnalysis === true)}
+                      title={h === 5 && workspace?.target.catalogEntry?.hasVerifiedAnalysis ? "Only the 2 m observer has verified recorded analysis" : undefined}
                       className={`px-2 py-0.5 rounded-lg text-[9px] font-mono-tech uppercase border transition ${
                         observerHeightM === h
                           ? 'border-emerald-400/45 bg-emerald-400/15 text-emerald-300'
@@ -915,7 +931,7 @@ export function App() {
                 </div>
               </div>
 
-              {/* Terrain Layer & NASA Moon Trek Texture Controls */}
+              {/* Terrain layer and LROC WAC imagery controls */}
               {workspace.demTerrain && (
                 <div className="grid grid-cols-3 gap-1.5">
                   <button
@@ -960,7 +976,7 @@ export function App() {
               >
                 <span className="text-[9px] font-mono-tech tracking-[0.12em] text-slate-300 uppercase inline-flex items-center gap-1.5">
                   <Globe className="w-3 h-3 text-cyan-300" />
-                  NASA Moon Trek LRO WAC
+                  LROC WAC · Lunaserv
                 </span>
                 <span
                   className={`text-[9px] font-mono-tech uppercase ${
@@ -1152,6 +1168,7 @@ export function App() {
               <button
                 type="button"
                 onClick={() => void exportAnalysisReport(workspace.analysis, 'csv')}
+                disabled={workspace.analysis.samples.length < 2}
                 title="Export 14-day mission visibility timeline as CSV"
                 className="px-2 py-0.5 rounded-full text-[9px] font-mono-tech tracking-wider uppercase border border-white/10 bg-white/[0.04] text-slate-300 hover:text-white hover:border-white/25 transition inline-flex items-center gap-1"
               >
@@ -1161,6 +1178,7 @@ export function App() {
               <button
                 type="button"
                 onClick={() => void exportAnalysisReport(workspace.analysis, 'json')}
+                disabled={workspace.analysis.samples.length < 2}
                 title="Export contract analysis JSON"
                 className="px-2 py-0.5 rounded-full text-[9px] font-mono-tech tracking-wider uppercase border border-white/10 bg-white/[0.04] text-slate-300 hover:text-white hover:border-white/25 transition inline-flex items-center gap-1"
               >
@@ -1209,7 +1227,7 @@ export function App() {
                     earthIn ? 'text-emerald-400' : 'text-rose-400'
                   }`}
                 >
-                  {earthIn ? 'In Range' : 'Obstructed'}{' '}
+                  {currentSample?.earth.visible == null ? 'Unknown' : earthIn ? 'Visible' : 'Obstructed'}{' '}
                   {earthMarginDeg !== null && `(${earthMarginDeg >= 0 ? '+' : ''}${earthMarginDeg.toFixed(1)}°)`}
                 </div>
               </div>
@@ -1251,8 +1269,7 @@ export function App() {
                 <div>
                   <div className="text-[8px] font-mono-tech tracking-[0.14em] text-slate-500 uppercase">Elev</div>
                   <div className="text-[11px] font-mono-tech text-slate-200 tabular-nums mt-0.5">
-                    {workspace.target.elevation_m >= 0 ? '+' : ''}
-                    {Math.round(workspace.target.elevation_m).toLocaleString()}m
+                    {workspace.target.isCatalogSite ? `${workspace.target.elevation_m >= 0 ? '+' : ''}${Math.round(workspace.target.elevation_m).toLocaleString()} m` : 'Not sampled'}
                   </div>
                 </div>
                 <div>
