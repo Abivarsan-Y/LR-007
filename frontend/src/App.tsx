@@ -1059,7 +1059,7 @@ export function App() {
   }, [workspace, traverseOpen, selectCatalogSite])
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
+    <div className="lunar-ui relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
       {/* Cesium lunar sphere with streamed LROC imagery and verified local LOLA grids */}
       <CesiumLunarStage
         catalogSites={CATALOG_SITES}
@@ -1101,7 +1101,7 @@ export function App() {
         ref={searchWrapperRef}
         className="fixed top-4 left-1/2 -translate-x-1/2 z-30 w-[95vw] max-w-[820px]"
       >
-        <div className="glass-hud rounded-full px-3 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-[0_12px_40px_rgba(0,0,0,0.68)] transition-colors focus-within:border-white/25">
+        <div className="glass-hud lunar-search-glass rounded-full px-3 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-[0_12px_40px_rgba(0,0,0,0.68)] transition-colors focus-within:border-white/25">
           <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
           <input
@@ -2715,7 +2715,7 @@ export function App() {
                   </span>
                 </div>
               </div>
-              <div className="relative w-full h-[112px] rounded-xl bg-black/50 border border-white/[0.07] overflow-hidden">
+                        <div className="lunar-chart-glass relative w-full h-[112px] rounded-xl bg-black/50 border border-white/[0.07] overflow-hidden">
                 <HorizonProfileCanvas
                   horizon={workspace.analysis.horizon}
                   currentSample={currentSample}
