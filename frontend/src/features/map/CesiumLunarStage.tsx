@@ -133,6 +133,7 @@ export function CesiumLunarStage(props: Props) {
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
     try{
+      setError('')
       if(verified&&props.demTerrain)makePatch(rt,props.demTerrain,props.verticalScale,props.overlayMode==='slope')
       else discardPatch(rt)
     }catch(e){setError(e instanceof Error?e.message:'Terrain geometry could not load')}
@@ -150,7 +151,8 @@ export function CesiumLunarStage(props: Props) {
       const radius=rt.bounds.radius
       if(props.surfacePreset==='HORIZON'){
         const origin=position(canonical.coordinates.longitude_deg,canonical.coordinates.latitude_deg,canonical.coordinates.elevation_m+props.observerHeightM)
-        rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(origin,MOON),new C.HeadingPitchRange(0,C.Math.toRadians(-4),15))
+        // setView places the eye at the actual observer, rather than 15 m behind it.
+        rt.viewer.camera.setView({destination:origin,orientation:{heading:0,pitch:C.Math.toRadians(-4),roll:0}})
       }else{
         rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(rt.patchCentre,MOON),new C.HeadingPitchRange(0,-.65,radius*3.2))
       }

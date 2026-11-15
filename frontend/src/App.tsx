@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronLeft,
@@ -31,13 +31,14 @@ import {
 } from './api/client'
 import type { CatalogSiteEntry, LoadedSiteWorkspace } from './api/types'
 import { HorizonProfileCanvas } from './features/analysis/HorizonProfileCanvas'
-import {
-  CesiumLunarStage,
-  type SurfaceCameraPreset,
-  type SurfacePickEvent,
-  type TerrainOverlayMode,
+import type {
+  SurfaceCameraPreset,
+  SurfacePickEvent,
+  TerrainOverlayMode,
 } from './features/map/CesiumLunarStage'
 import { PolarMap } from './features/map/PolarMap'
+import { ViewerBoundary } from './features/map/ViewerBoundary'
+const CesiumLunarStage = lazy(() => import('./features/map/CesiumLunarStage').then(module => ({ default: module.CesiumLunarStage })))
 
 function parseCoordinateQuery(raw: string): { lat: number; lon: number } | null {
   const cleaned = raw.trim().replace(/°/g, ' ').replace(/,/g, ' ')
@@ -442,6 +443,8 @@ export function App() {
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
       {/* Cesium lunar sphere with streamed LROC imagery and the verified local Site01 grid */}
+      <ViewerBoundary>
+      <Suspense fallback={<div role="status" className="absolute inset-0 grid place-items-center text-sm text-slate-300">Loading lunar viewer…</div>}>
       <CesiumLunarStage
         catalogSites={CATALOG_SITES}
         selectedSiteId={workspace?.target.catalogEntry?.id ?? null}
@@ -467,6 +470,8 @@ export function App() {
         onSelectCatalogSite={site => void selectCatalogSite(site, true)}
         onNasaImageryStatusChange={setNasaImageryStatus}
       />
+      </Suspense>
+      </ViewerBoundary>
 
       {loadError && <div role="alert" className="fixed top-20 left-1/2 -translate-x-1/2 z-40 glass-hud rounded-xl p-3 text-xs text-rose-200">{loadError}</div>}
       {/* Top Floating Search & Camera Control Pill */}
