@@ -14,6 +14,10 @@ import type {
   LoadedSiteWorkspace,
   SlopeBand,
   TerrainMetadata,
+  TraverseAutomaticResponse,
+  TraverseManualCandidate,
+  TraverseManualResponse,
+  TraverseWaypoint,
 } from './types'
 
 const legacyPreview: DashboardPreview = {
@@ -718,6 +722,497 @@ export function interpolateHorizonSample(
   azimuthDeg: number,
 ): number | null {
   return circularHorizonLookup(horizon, azimuthDeg)
+}
+
+const LUNAR_RADIUS_M = 1737400.0
+const ROVER_BATTERY_CAPACITY_WH = 1200.0
+const ROVER_BASE_DRIVE_POWER_W = 150.0
+const ROVER_PEAK_SOLAR_POWER_W = 350.0
+const ROVER_SPEED_MPS = 0.5
+const ROVER_MIN_RESERVE_PCT = 20.0
+const ROVER_MAX_SLOPE_DEG = 15.0
+const ROVER_MAST_H_M = 2.0
+const BASE_POD_MAST_H_M = 5.0
+
+export function sphericalDistanceAndBearing(
+  lat1Deg: number,
+  lon1Deg: number,
+  lat2Deg: number,
+  lon2Deg: number,
+): { distanceM: number; bearingDeg: number } {
+  const phi1 = (lat1Deg * Math.PI) / 180
+  const phi2 = (lat2Deg * Math.PI) / 180
+  const dPhi = phi2 - phi1
+  const dLon = ((lon2Deg - lon1Deg) * Math.PI) / 180
+  const sinDPhi = Math.sin(dPhi / 2)
+  const sinDLon = Math.sin(dLon / 2)
+  const a = sinDPhi * sinDPhi + Math.cos(phi1) * Math.cos(phi2) * sinDLon * sinDLon
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(Math.max(0, 1 - a)))
+  const distanceM = LUNAR_RADIUS_M * c
+  const y = Math.sin(dLon) * Math.cos(phi2)
+  const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon)
+  const bearingDeg = ((Math.atan2(y, x) * RAD_TO_DEG) % 360 + 360) % 360
+  return { distanceM, bearingDeg }
+}
+
+export function sphericalDestination(
+  latDeg: number,
+  lonDeg: number,
+  bearingDeg: number,
+  distanceM: number,
+): { lat: number; lon: number } {
+  const angDist = distanceM / LUNAR_RADIUS_M
+  if (angDist === 0) return { lat: latDeg, lon: normalizeLongitudeDeg(lonDeg) }
+  const phi1 = (latDeg * Math.PI) / 180
+  const lam1 = (lonDeg * Math.PI) / 180
+  const brng = (bearingDeg * Math.PI) / 180
+  const phi2 = Math.asin(Math.sin(phi1) * Math.cos(angDist) + Math.cos(phi1) * Math.sin(angDist) * Math.cos(brng))
+  const lam2 =
+    lam1 +
+    Math.atan2(
+      Math.sin(brng) * Math.sin(angDist) * Math.cos(phi1),
+      Math.cos(angDist) - Math.sin(phi1) * Math.sin(phi2),
+    )
+  return { lat: phi2 * RAD_TO_DEG, lon: normalizeLongitudeDeg(lam2 * RAD_TO_DEG) }
+}
+
+export function sampleDemAtLatLon(
+  dem: DecodedDemSiteTerrain | null,
+  latDeg: number,
+  lonDeg: number,
+): { elevationM: number; slopeDeg: number; insidePatch: boolean } {
+  if (!dem) return { elevationM: 0, slopeDeg: 0, insidePatch: false }
+  const { width, height, spacing_m: spacing, coordinates } = dem.metadata
+  const { distanceM, bearingDeg } = sphericalDistanceAndBearing(
+    coordinates.latitude_deg,
+    coordinates.longitude_deg,
+    latDeg,
+    lonDeg,
+  )
+  const brngRad = (bearingDeg * Math.PI) / 180
+  const eastM = distanceM * Math.sin(brngRad)
+  const northM = distanceM * Math.cos(brngRad)
+  const rawCol = eastM / spacing + (width - 1) / 2
+  const rawRow = -northM / spacing + (height - 1) / 2
+  const insidePatch = rawCol >= 0 && rawCol <= width - 1 && rawRow >= 0 && rawRow <= height - 1
+  const col = Math.max(0, Math.min(width - 1, rawCol))
+  const row = Math.max(0, Math.min(height - 1, rawRow))
+  const c0 = Math.floor(col)
+  const r0 = Math.floor(row)
+  const c1 = Math.min(c0 + 1, width - 1)
+  const r1 = Math.min(r0 + 1, height - 1)
+  const dx = col - c0
+  const dy = row - r0
+
+  const idx00 = r0 * width + c0
+  const idx10 = r0 * width + c1
+  const idx01 = r1 * width + c0
+  const idx11 = r1 * width + c1
+
+  const h00 = coordinates.elevation_m + dem.positions[idx00 * 3 + 1]
+  const h10 = coordinates.elevation_m + dem.positions[idx10 * 3 + 1]
+  const h01 = coordinates.elevation_m + dem.positions[idx01 * 3 + 1]
+  const h11 = coordinates.elevation_m + dem.positions[idx11 * 3 + 1]
+  const elevationM =
+    h00 * (1 - dx) * (1 - dy) + h10 * dx * (1 - dy) + h01 * (1 - dx) * dy + h11 * dx * dy
+
+  const s00 = Number.isFinite(dem.slopeDegPerVertex[idx00]) ? dem.slopeDegPerVertex[idx00] : 0
+  const s10 = Number.isFinite(dem.slopeDegPerVertex[idx10]) ? dem.slopeDegPerVertex[idx10] : s00
+  const s01 = Number.isFinite(dem.slopeDegPerVertex[idx01]) ? dem.slopeDegPerVertex[idx01] : s00
+  const s11 = Number.isFinite(dem.slopeDegPerVertex[idx11]) ? dem.slopeDegPerVertex[idx11] : s00
+  const slopeDeg =
+    s00 * (1 - dx) * (1 - dy) + s10 * dx * (1 - dy) + s01 * (1 - dx) * dy + s11 * dx * dy
+
+  return { elevationM, slopeDeg, insidePatch }
+}
+
+function checkLocalSurfaceLos(
+  dem: DecodedDemSiteTerrain | null,
+  baseLat: number,
+  baseLon: number,
+  roverLat: number,
+  roverLon: number,
+): { hasLos: boolean; minClearanceM: number } {
+  const { distanceM, bearingDeg } = sphericalDistanceAndBearing(baseLat, baseLon, roverLat, roverLon)
+  if (distanceM <= 5.0) return { hasLos: true, minClearanceM: ROVER_MAST_H_M }
+
+  const zBase = sampleDemAtLatLon(dem, baseLat, baseLon).elevationM
+  const zRover = sampleDemAtLatLon(dem, roverLat, roverLon).elevationM
+  const eyeBase = zBase + BASE_POD_MAST_H_M
+  const eyeRover = zRover + ROVER_MAST_H_M
+  const numSteps = Math.max(4, Math.min(32, Math.floor(distanceM / 60)))
+  let minClearanceM = Number.POSITIVE_INFINITY
+  let hasLos = true
+
+  for (let i = 1; i < numSteps; i++) {
+    const d = (i / numSteps) * distanceM
+    const pt = sphericalDestination(baseLat, baseLon, bearingDeg, d)
+    const frac = d / distanceM
+    const rayElevChord = eyeBase + frac * (eyeRover - eyeBase)
+    const chordBulge = (d * (distanceM - d)) / (2 * LUNAR_RADIUS_M)
+    const effectiveRayElev = rayElevChord - chordBulge
+    const terrainElev = sampleDemAtLatLon(dem, pt.lat, pt.lon).elevationM
+    const clearance = effectiveRayElev - terrainElev
+    if (clearance < minClearanceM) minClearanceM = clearance
+    if (clearance <= 0) hasLos = false
+  }
+  return { hasLos, minClearanceM: Number.isFinite(minClearanceM) ? minClearanceM : 0 }
+}
+
+function estimateLocalSolarIllumination(
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+  latDeg: number,
+  lonDeg: number,
+  sunAzimuthDeg: number,
+  sunElevationDeg: number,
+): number {
+  const obsElev = sampleDemAtLatLon(dem, latDeg, lonDeg).elevationM + ROVER_MAST_H_M
+  let maxHorizonAngle = circularHorizonLookup(horizon, sunAzimuthDeg) ?? -2.0
+  if (dem) {
+    let localHorizon = Number.NEGATIVE_INFINITY
+    for (let d = 80; d <= dem.span; d += 80) {
+      const pt = sphericalDestination(latDeg, lonDeg, sunAzimuthDeg, d)
+      const sampled = sampleDemAtLatLon(dem, pt.lat, pt.lon)
+      if (!sampled.insidePatch) break
+      const drop = (d * d) / (2 * LUNAR_RADIUS_M)
+      const angle = Math.atan2(sampled.elevationM - obsElev - drop, d) * RAD_TO_DEG
+      if (angle > localHorizon) localHorizon = angle
+    }
+    if (Number.isFinite(localHorizon)) {
+      maxHorizonAngle = Math.max(maxHorizonAngle, localHorizon)
+    }
+  }
+  const clearance = sunElevationDeg - maxHorizonAngle
+  return Math.max(0, Math.min(1, (clearance + 0.265) / 0.53))
+}
+
+function computeLocalLegPower(
+  distanceM: number,
+  slopeDeg: number,
+  illuminationFraction: number,
+  currentBatteryWh: number,
+): { newBatteryWh: number; deltaWh: number; reservePct: number } {
+  const slopeRad = (Math.max(0, slopeDeg) * Math.PI) / 180
+  const pDrive = ROVER_BASE_DRIVE_POWER_W * (1.0 + 1.8 * Math.sin(slopeRad))
+  const pGen = ROVER_PEAK_SOLAR_POWER_W * illuminationFraction
+  const pNet = pGen - pDrive
+  const travelHours = distanceM / (ROVER_SPEED_MPS * 3600.0)
+  const deltaWh = pNet * travelHours
+  const newBatteryWh = Math.min(ROVER_BATTERY_CAPACITY_WH, Math.max(0, currentBatteryWh + deltaWh))
+  const reservePct = (newBatteryWh / ROVER_BATTERY_CAPACITY_WH) * 100.0
+  return { newBatteryWh, deltaWh, reservePct }
+}
+
+function computeLocalTraverseManual(
+  params: {
+    current_latitude_deg: number
+    current_longitude_deg: number
+    target_latitude_deg: number
+    target_longitude_deg: number
+    base_latitude_deg?: number | null
+    base_longitude_deg?: number | null
+    current_battery_wh?: number
+    step_distance_m?: number
+    num_candidates?: number
+    sun_azimuth_deg?: number
+    sun_elevation_deg?: number
+  },
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+): TraverseManualResponse {
+  const currentLat = params.current_latitude_deg
+  const currentLon = params.current_longitude_deg
+  const targetLat = params.target_latitude_deg
+  const targetLon = params.target_longitude_deg
+  const baseLat = params.base_latitude_deg ?? currentLat
+  const baseLon = params.base_longitude_deg ?? currentLon
+  const currentBat = params.current_battery_wh ?? 1000.0
+  const stepDist = params.step_distance_m ?? 250.0
+  const numCands = params.num_candidates ?? 8
+  const sunAz = params.sun_azimuth_deg ?? 180.0
+  const sunEl = params.sun_elevation_deg ?? 1.0
+
+  const { distanceM: currentDistToTarget, bearingDeg: azToTarget } = sphericalDistanceAndBearing(
+    currentLat,
+    currentLon,
+    targetLat,
+    targetLon,
+  )
+  const curSample = sampleDemAtLatLon(dem, currentLat, currentLon)
+  const curLos = checkLocalSurfaceLos(dem, baseLat, baseLon, currentLat, currentLon)
+
+  const candidates: TraverseManualCandidate[] = []
+  const arcSpan = 130.0
+  const halfArc = arcSpan / 2
+
+  for (let i = 0; i < numCands; i++) {
+    const bearing = azToTarget - halfArc + (i / Math.max(1, numCands - 1)) * arcSpan
+    const dest = sphericalDestination(currentLat, currentLon, bearing, stepDist)
+    const candSample = sampleDemAtLatLon(dem, dest.lat, dest.lon)
+    const { distanceM: distToTarget } = sphericalDistanceAndBearing(dest.lat, dest.lon, targetLat, targetLon)
+    const progressM = currentDistToTarget - distToTarget
+    const illum = estimateLocalSolarIllumination(dem, horizon, dest.lat, dest.lon, sunAz, sunEl)
+    const pwr = computeLocalLegPower(stepDist, candSample.slopeDeg, illum, currentBat)
+    const los = checkLocalSurfaceLos(dem, baseLat, baseLon, dest.lat, dest.lon)
+
+    let isValid = true
+    const rejectionReasons: string[] = []
+    if (candSample.slopeDeg > ROVER_MAX_SLOPE_DEG) {
+      isValid = false
+      rejectionReasons.push(`Excessive slope (${candSample.slopeDeg.toFixed(1)}° > 15° limit)`)
+    }
+    if (pwr.reservePct < ROVER_MIN_RESERVE_PCT) {
+      isValid = false
+      rejectionReasons.push(`Low battery reserve (${pwr.reservePct.toFixed(1)}% < 20%)`)
+    }
+
+    const score =
+      progressM + illum * 150.0 + (los.hasLos ? 100.0 : 0.0) - candSample.slopeDeg * 20.0
+
+    candidates.push({
+      candidate_id: `cand_${i + 1}`,
+      coordinates: {
+        latitude_deg: Number(dest.lat.toFixed(6)),
+        longitude_deg: Number(dest.lon.toFixed(6)),
+        elevation_m: Number(candSample.elevationM.toFixed(1)),
+      },
+      step_bearing_deg: Number((((bearing % 360) + 360) % 360).toFixed(1)),
+      step_distance_m: Number(stepDist.toFixed(1)),
+      distance_to_target_m: Number(distToTarget.toFixed(1)),
+      distance_progress_m: Number(progressM.toFixed(1)),
+      slope_deg: Number(candSample.slopeDeg.toFixed(1)),
+      slope_band: classifySlopeBand(candSample.slopeDeg),
+      illumination_fraction: Number(illum.toFixed(3)),
+      battery_wh: Number(pwr.newBatteryWh.toFixed(1)),
+      battery_reserve_pct: Number(pwr.reservePct.toFixed(1)),
+      battery_delta_wh: Number(pwr.deltaWh.toFixed(1)),
+      los_to_base: los.hasLos,
+      los_clearance_m: Number(los.minClearanceM.toFixed(1)),
+      is_valid: isValid,
+      rejection_reasons: rejectionReasons,
+      score: Number(score.toFixed(1)),
+    })
+  }
+
+  candidates.sort((a, b) => {
+    if (a.is_valid !== b.is_valid) return a.is_valid ? -1 : 1
+    return b.score - a.score
+  })
+
+  return {
+    mode: 'manual',
+    current_position: {
+      latitude_deg: Number(currentLat.toFixed(6)),
+      longitude_deg: Number(currentLon.toFixed(6)),
+      elevation_m: Number(curSample.elevationM.toFixed(1)),
+      slope_deg: Number(curSample.slopeDeg.toFixed(1)),
+      battery_wh: Number(currentBat.toFixed(1)),
+      los_to_base: curLos.hasLos,
+    },
+    target_destination: {
+      latitude_deg: Number(targetLat.toFixed(6)),
+      longitude_deg: Number(targetLon.toFixed(6)),
+      initial_distance_to_target_m: Number(currentDistToTarget.toFixed(1)),
+    },
+    base_pod: {
+      latitude_deg: Number(baseLat.toFixed(6)),
+      longitude_deg: Number(baseLon.toFixed(6)),
+    },
+    candidates,
+  }
+}
+
+export async function requestTraverseManual(
+  params: {
+    current_latitude_deg: number
+    current_longitude_deg: number
+    target_latitude_deg: number
+    target_longitude_deg: number
+    base_latitude_deg?: number | null
+    base_longitude_deg?: number | null
+    current_battery_wh?: number
+    step_distance_m?: number
+    num_candidates?: number
+    sun_azimuth_deg?: number
+    sun_elevation_deg?: number
+  },
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+): Promise<TraverseManualResponse> {
+  const apiRes = await fetchJsonOrNull<TraverseManualResponse>('/api/traverse/manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (apiRes) return apiRes
+  return computeLocalTraverseManual(params, dem, horizon)
+}
+
+export async function requestTraverseAutomatic(
+  params: {
+    start_latitude_deg: number
+    start_longitude_deg: number
+    target_latitude_deg: number
+    target_longitude_deg: number
+    base_latitude_deg?: number | null
+    base_longitude_deg?: number | null
+    initial_battery_wh?: number
+    step_m?: number
+    max_steps?: number
+    sun_azimuth_deg?: number
+    sun_elevation_deg?: number
+  },
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+): Promise<TraverseAutomaticResponse> {
+  const apiRes = await fetchJsonOrNull<TraverseAutomaticResponse>('/api/traverse/automatic', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (apiRes) return apiRes
+
+  const startLat = params.start_latitude_deg
+  const startLon = params.start_longitude_deg
+  const targetLat = params.target_latitude_deg
+  const targetLon = params.target_longitude_deg
+  const baseLat = params.base_latitude_deg ?? startLat
+  const baseLon = params.base_longitude_deg ?? startLon
+  const stepM = params.step_m ?? 250.0
+  const maxSteps = params.max_steps ?? 40
+  const sunAz = params.sun_azimuth_deg ?? 180.0
+  const sunEl = params.sun_elevation_deg ?? 1.0
+
+  let currLat = startLat
+  let currLon = startLon
+  let currBat = params.initial_battery_wh ?? 1000.0
+  let totalDist = 0.0
+  let status: 'OPTIMAL' | 'FEASIBLE' | 'BLOCKED' = 'OPTIMAL'
+
+  const startSample = sampleDemAtLatLon(dem, startLat, startLon)
+  const startIllum = estimateLocalSolarIllumination(dem, horizon, startLat, startLon, sunAz, sunEl)
+  const initDist = sphericalDistanceAndBearing(startLat, startLon, targetLat, targetLon).distanceM
+
+  const waypoints: TraverseWaypoint[] = [
+    {
+      waypoint_index: 0,
+      coordinates: {
+        latitude_deg: Number(startLat.toFixed(6)),
+        longitude_deg: Number(startLon.toFixed(6)),
+        elevation_m: Number(startSample.elevationM.toFixed(1)),
+      },
+      distance_from_start_m: 0,
+      distance_to_target_m: Number(initDist.toFixed(1)),
+      slope_deg: Number(startSample.slopeDeg.toFixed(1)),
+      illumination_fraction: Number(startIllum.toFixed(3)),
+      battery_wh: Number(currBat.toFixed(1)),
+      battery_reserve_pct: Number(((currBat / ROVER_BATTERY_CAPACITY_WH) * 100).toFixed(1)),
+      los_to_base: true,
+      action: 'START_BASE_POD',
+    },
+  ]
+
+  for (let step = 1; step <= maxSteps; step++) {
+    const distRem = sphericalDistanceAndBearing(currLat, currLon, targetLat, targetLon).distanceM
+    if (distRem <= stepM * 1.1) {
+      const targetSample = sampleDemAtLatLon(dem, targetLat, targetLon)
+      const targetIllum = estimateLocalSolarIllumination(dem, horizon, targetLat, targetLon, sunAz, sunEl)
+      const finalPwr = computeLocalLegPower(distRem, targetSample.slopeDeg, targetIllum, currBat)
+      const finalLos = checkLocalSurfaceLos(dem, baseLat, baseLon, targetLat, targetLon)
+      totalDist += distRem
+      waypoints.push({
+        waypoint_index: step,
+        coordinates: {
+          latitude_deg: Number(targetLat.toFixed(6)),
+          longitude_deg: Number(targetLon.toFixed(6)),
+          elevation_m: Number(targetSample.elevationM.toFixed(1)),
+        },
+        distance_from_start_m: Number(totalDist.toFixed(1)),
+        distance_to_target_m: 0,
+        slope_deg: Number(targetSample.slopeDeg.toFixed(1)),
+        illumination_fraction: Number(targetIllum.toFixed(3)),
+        battery_wh: Number(finalPwr.newBatteryWh.toFixed(1)),
+        battery_reserve_pct: Number(finalPwr.reservePct.toFixed(1)),
+        los_to_base: finalLos.hasLos,
+        action: 'ARRIVE_RESEARCH_TARGET',
+      })
+      break
+    }
+
+    const stepRes = computeLocalTraverseManual(
+      {
+        current_latitude_deg: currLat,
+        current_longitude_deg: currLon,
+        target_latitude_deg: targetLat,
+        target_longitude_deg: targetLon,
+        base_latitude_deg: baseLat,
+        base_longitude_deg: baseLon,
+        current_battery_wh: currBat,
+        step_distance_m: stepM,
+        num_candidates: 12,
+        sun_azimuth_deg: sunAz,
+        sun_elevation_deg: sunEl,
+      },
+      dem,
+      horizon,
+    )
+
+    const validCands = stepRes.candidates.filter(c => c.is_valid)
+    if (!validCands.length) {
+      status = step > 2 ? 'FEASIBLE' : 'BLOCKED'
+      break
+    }
+
+    const best = validCands[0]
+    currLat = best.coordinates.latitude_deg
+    currLon = best.coordinates.longitude_deg
+    currBat = best.battery_wh
+    totalDist += best.step_distance_m
+
+    waypoints.push({
+      waypoint_index: step,
+      coordinates: best.coordinates,
+      distance_from_start_m: Number(totalDist.toFixed(1)),
+      distance_to_target_m: best.distance_to_target_m,
+      slope_deg: best.slope_deg,
+      illumination_fraction: best.illumination_fraction,
+      battery_wh: best.battery_wh,
+      battery_reserve_pct: best.battery_reserve_pct,
+      los_to_base: best.los_to_base,
+      action: `STEP_${step}`,
+    })
+
+    if (step === maxSteps) {
+      status = 'FEASIBLE'
+    }
+  }
+
+  const maxSlope = Math.max(...waypoints.map(w => w.slope_deg))
+  const avgSlope = waypoints.reduce((s, w) => s + w.slope_deg, 0) / waypoints.length
+  const avgIllum = waypoints.reduce((s, w) => s + w.illumination_fraction, 0) / waypoints.length
+  const minBat = Math.min(...waypoints.map(w => w.battery_wh))
+  const finalBat = waypoints[waypoints.length - 1].battery_wh
+  const losFrac = waypoints.filter(w => w.los_to_base).length / waypoints.length
+
+  return {
+    mode: 'automatic',
+    status,
+    start_coordinates: { latitude_deg: Number(startLat.toFixed(6)), longitude_deg: Number(startLon.toFixed(6)) },
+    target_destination: { latitude_deg: Number(targetLat.toFixed(6)), longitude_deg: Number(targetLon.toFixed(6)) },
+    base_pod: { latitude_deg: Number(baseLat.toFixed(6)), longitude_deg: Number(baseLon.toFixed(6)) },
+    summary: {
+      total_waypoints: waypoints.length,
+      total_traverse_distance_m: Number(totalDist.toFixed(1)),
+      max_slope_deg: Number(maxSlope.toFixed(1)),
+      avg_slope_deg: Number(avgSlope.toFixed(1)),
+      avg_illumination_fraction: Number(avgIllum.toFixed(3)),
+      min_battery_wh: Number(minBat.toFixed(1)),
+      final_battery_wh: Number(finalBat.toFixed(1)),
+      base_los_fraction: Number(losFrac.toFixed(2)),
+    },
+    waypoints,
+  }
 }
 
 export const api = {

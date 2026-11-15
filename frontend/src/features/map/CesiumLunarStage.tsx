@@ -1,7 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import * as C from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import type { AnalysisSample, CatalogSiteEntry, ContractRecommendDocument, Coordinates, DecodedDemSiteTerrain } from '../../api/types'
+import type {
+  AnalysisSample,
+  CatalogSiteEntry,
+  ContractRecommendDocument,
+  Coordinates,
+  DecodedDemSiteTerrain,
+  TraverseManualCandidate,
+  TraverseWaypoint,
+} from '../../api/types'
+import { sampleDemAtLatLon } from '../../api/client'
 import { RADIUS, WMS_URL, offsetCoordinate, directionEnu, mapImageUrl, observerMatches, isCanonicalTerrain } from './lunar.mjs'
 import canonical from '../../../../backend/tests/fixtures/science/site01/site.json'
 
@@ -20,6 +29,12 @@ interface Props {
   analysisCoordinates: Coordinates | null; analysisObserverHeightM: number | null; analysisDataKind: string | null
   recommendations: ContractRecommendDocument | null; highlightedCandidateId: string | null
   overlayMode: TerrainOverlayMode; showWireframe: boolean; verticalScale: number; observerHeightM: 2 | 5
+  traverseWaypoints?: TraverseWaypoint[]
+  traverseCandidates?: TraverseManualCandidate[]
+  traverseTarget?: { latitude_deg: number; longitude_deg: number; elevation_m?: number; label?: string } | null
+  pickingTraverseTarget?: boolean
+  onSelectTraverseCandidate?: (candidate: TraverseManualCandidate) => void
+  onPickTraverseTarget?: (coords: { latitude_deg: number; longitude_deg: number; elevation_m: number }) => void
   onCameraModeChange: (mode: 'ORBITAL' | 'SURFACE') => void
   onPickPoint: (pick: SurfacePickEvent) => void; onSelectCatalogSite: (site: CatalogSiteEntry) => void
   onNasaImageryStatusChange?: (status: 'loading' | 'loaded' | 'offline') => void
@@ -27,11 +42,24 @@ interface Props {
 interface Runtime {
   viewer: C.Viewer; patch: C.Primitive | null; wire: C.PolylineCollection | null
   imageMaterial: C.Material | null; bounds: C.BoundingSphere | null; local: boolean
-  rays: C.Entity[]; target: C.Entity | null; catalog: C.Entity[]; provider: C.WebMapServiceImageryProvider
+  rays: C.Entity[]; target: C.Entity | null; catalog: C.Entity[]; traverse: C.Entity[]; provider: C.WebMapServiceImageryProvider
   patchCentre: C.Cartesian3 | null
 }
 const MOON = new C.Ellipsoid(RADIUS, RADIUS, RADIUS)
 function position(lon: number, lat: number, height=0) { return C.Cartesian3.fromDegrees(lon,lat,height,MOON) }
+function terrainPosition(
+  lat: number,
+  lon: number,
+  elevM: number,
+  demOrigin: Coordinates | null,
+  verticalScale: number,
+  elevOffsetM: number,
+) {
+  const height = demOrigin
+    ? demOrigin.elevation_m + (elevM - demOrigin.elevation_m) * verticalScale + elevOffsetM
+    : elevOffsetM
+  return position(lon, lat, height)
+}
 function discardPatch(rt: Runtime) {
   if (rt.patch) rt.viewer.scene.primitives.remove(rt.patch)
   if (rt.wire) rt.viewer.scene.primitives.remove(rt.wire)
@@ -86,6 +114,7 @@ export function CesiumLunarStage(props: Props) {
   const [ready,setReady]=useState(0),[error,setError]=useState(''),[message,setMessage]=useState('Loading LROC imagery…')
   const focusMatches=!!props.focusCoordinates && Math.abs(props.focusCoordinates.latitude_deg-canonical.coordinates.latitude_deg)<1e-7 && Math.abs(props.focusCoordinates.longitude_deg-canonical.coordinates.longitude_deg)<1e-7
   const verified=focusMatches&&isCanonicalTerrain(props.demTerrain?.metadata,canonical.coordinates)
+  const hasDemPatch=!!props.focusCoordinates&&!!props.demTerrain&&props.demTerrain.metadata.provenance?.data_kind==='cached_real'&&Math.abs(props.focusCoordinates.latitude_deg-props.demTerrain.metadata.coordinates.latitude_deg)<1e-4&&Math.abs(((props.focusCoordinates.longitude_deg-props.demTerrain.metadata.coordinates.longitude_deg+180)%360+360)%360-180)<1e-4
   const matching=verified&&observerMatches(props.demTerrain?.metadata,props.analysisCoordinates,props.analysisObserverHeightM,props.observerHeightM,props.analysisDataKind)
   useEffect(()=>{
     if(!host.current)return
@@ -99,13 +128,13 @@ export function CesiumLunarStage(props: Props) {
       viewer.scene.backgroundColor=C.Color.fromCssColorString('#050507')
       const provider=new C.WebMapServiceImageryProvider({url:WMS_URL,layers:'luna_wac_global',parameters:{version:'1.1.1',srs:'IAU2000:30100',format:'image/jpeg',transparent:false},tilingScheme:new C.GeographicTilingScheme({ellipsoid:MOON}),maximumLevel:10,enablePickFeatures:false,credit:'NASA / GSFC / ASU · LROC WAC via Lunaserv'})
       viewer.imageryLayers.addImageryProvider(provider)
-      rt={viewer,provider,patch:null,wire:null,imageMaterial:null,bounds:null,local:false,rays:[],target:null,catalog:[],patchCentre:null}
+      rt={viewer,provider,patch:null,wire:null,imageMaterial:null,bounds:null,local:false,rays:[],target:null,catalog:[],traverse:[],patchCentre:null}
       runtime.current=rt
       latest.current.onNasaImageryStatusChange?.('loading')
       provider.errorEvent.addEventListener(()=>{if(!alive)return;failed=true;setMessage('LROC imagery unavailable. No synthetic image is substituted.');latest.current.onNasaImageryStatusChange?.('offline')})
       viewer.scene.globe.tileLoadProgressEvent.addEventListener(pending=>{
         if(!alive||failed)return
-        if(pending===0){setMessage('LROC WAC imagery · Lunar sphere; relief only at the verified Site01 patch.');latest.current.onNasaImageryStatusChange?.('loaded')}
+        if(pending===0){setMessage('LROC WAC imagery · Lunar sphere; relief available on LOLA catalog patches.');latest.current.onNasaImageryStatusChange?.('loaded')}
       })
       viewer.camera.setView({destination:position(0,-15,RADIUS*3)})
       for(const site of latest.current.catalogSites){
@@ -116,9 +145,30 @@ export function CesiumLunarStage(props: Props) {
       picker.setInputAction((event:{position:C.Cartesian2})=>{
         const selected=viewer.scene.pick(event.position)
         const id=selected?.id?.id
+        if(typeof id==='string'&&id.startsWith('traverse-cand:')){
+          const candId=id.slice('traverse-cand:'.length)
+          const cand=latest.current.traverseCandidates?.find(c=>c.candidate_id===candId)
+          if(cand){latest.current.onSelectTraverseCandidate?.(cand);return}
+        }
         const site=typeof id==='string'&&id.startsWith('catalog:')?latest.current.catalogSites.find(s=>`catalog:${s.id}`===id):null
-        if(site){latest.current.onSelectCatalogSite(site);return}
-        if(runtime.current?.local){setMessage('Terrain inspection is fixed to the canonical Site01 observer; selecting another point requires a new analysis.');return}
+        if(site&&!latest.current.pickingTraverseTarget){latest.current.onSelectCatalogSite(site);return}
+        if(latest.current.pickingTraverseTarget){
+          let picked: C.Cartesian3 | undefined
+          if(viewer.scene.pickPositionSupported){
+            const candidatePick=viewer.scene.pickPosition(event.position)
+            if(candidatePick&&Number.isFinite(candidatePick.x)&&Math.abs(C.Cartesian3.magnitude(candidatePick)-RADIUS)<50000){
+              picked=candidatePick
+            }
+          }
+          if(!picked) picked=viewer.camera.pickEllipsoid(event.position,MOON)
+          if(!picked) return
+          const cart=MOON.cartesianToCartographic(picked)
+          const lat=C.Math.toDegrees(cart.latitude),lon=C.Math.toDegrees(cart.longitude)
+          const sampled=sampleDemAtLatLon(latest.current.demTerrain,lat,lon)
+          latest.current.onPickTraverseTarget?.({latitude_deg:lat,longitude_deg:lon,elevation_m:sampled.insidePatch?sampled.elevationM:cart.height})
+          return
+        }
+        if(runtime.current?.local){setMessage('Terrain inspection is fixed to the local DEM patch; use Pick Target for rover destination or Orbital view.');return}
         const picked=viewer.camera.pickEllipsoid(event.position,MOON);if(!picked)return
         const cart=MOON.cartesianToCartographic(picked)
         latest.current.onPickPoint({latitude_deg:C.Math.toDegrees(cart.latitude),longitude_deg:C.Math.toDegrees(cart.longitude),elevation_m:0,slope_deg:null,matchedCatalogSite:null,label:'Coordinate inspection · elevation not sampled',horizonAnglesDeg:[]})
@@ -133,23 +183,24 @@ export function CesiumLunarStage(props: Props) {
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
     try{
-      if(verified&&props.demTerrain)makePatch(rt,props.demTerrain,props.verticalScale,props.overlayMode==='slope')
+      if(hasDemPatch&&props.demTerrain)makePatch(rt,props.demTerrain,props.verticalScale,props.overlayMode==='slope')
       else discardPatch(rt)
     }catch(e){setError(e instanceof Error?e.message:'Terrain geometry could not load')}
-  },[ready,props.demTerrain,verified,props.verticalScale,props.overlayMode])
+  },[ready,props.demTerrain,hasDemPatch,props.verticalScale,props.overlayMode])
 
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
-    const local=props.desiredCameraMode==='SURFACE'&&verified&&!!rt.patchCentre
+    const local=props.desiredCameraMode==='SURFACE'&&hasDemPatch&&!!rt.patchCentre
     rt.local=local;rt.viewer.scene.globe.show=!local
     if(rt.patch)rt.patch.show=local
     if(rt.wire)rt.wire.show=local&&props.showWireframe
     for(const marker of rt.catalog)marker.show=!local
     rt.viewer.camera.lookAtTransform(C.Matrix4.IDENTITY)
+    const demOrigin=props.demTerrain?.metadata.coordinates??canonical.coordinates
     if(local&&rt.patchCentre&&rt.bounds){
       const radius=rt.bounds.radius
       if(props.surfacePreset==='HORIZON'){
-        const origin=position(canonical.coordinates.longitude_deg,canonical.coordinates.latitude_deg,canonical.coordinates.elevation_m+props.observerHeightM)
+        const origin=position(demOrigin.longitude_deg,demOrigin.latitude_deg,demOrigin.elevation_m+props.observerHeightM)
         rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(origin,MOON),new C.HeadingPitchRange(0,C.Math.toRadians(-4),15))
       }else{
         rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(rt.patchCentre,MOON),new C.HeadingPitchRange(0,-.65,radius*3.2))
@@ -163,7 +214,7 @@ export function CesiumLunarStage(props: Props) {
     rt.viewer.scene.requestRender()
   // Camera callback identities can change as App state changes; only actual camera inputs reset the view.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[ready,verified,props.demTerrain,props.desiredCameraMode,props.surfacePreset,props.cameraPresetNonce,props.focusCoordinates,props.hasSelection,props.verticalScale,props.overlayMode])
+  },[ready,hasDemPatch,props.demTerrain,props.desiredCameraMode,props.surfacePreset,props.cameraPresetNonce,props.focusCoordinates,props.hasSelection,props.verticalScale,props.overlayMode])
 
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
@@ -176,7 +227,7 @@ export function CesiumLunarStage(props: Props) {
     if(rt.target)rt.viewer.entities.remove(rt.target)
     rt.target=null
     if(props.focusCoordinates){
-      const fixed=rt.local?canonical.coordinates:null
+      const fixed=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
       const lat=fixed?.latitude_deg??props.focusCoordinates.latitude_deg,lon=fixed?.longitude_deg??props.focusCoordinates.longitude_deg
       rt.target=rt.viewer.entities.add({position:position(lon,lat,fixed?fixed.elevation_m+props.observerHeightM:0),point:{pixelSize:10,color:C.Color.AQUAMARINE,outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY}})
     }
@@ -196,10 +247,72 @@ export function CesiumLunarStage(props: Props) {
     rt.viewer.scene.requestRender()
   },[ready,matching,props.currentSample,props.showWireframe,props.useNasaTrekImagery,props.overlayMode,props.verticalScale,props.focusCoordinates,props.observerHeightM,props.desiredCameraMode,props.demTerrain])
 
+  useEffect(()=>{
+    const rt=runtime.current;if(!rt)return
+    for(const entity of rt.traverse)rt.viewer.entities.remove(entity)
+    rt.traverse=[]
+    const demOrigin=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
+    const scale=rt.local?props.verticalScale:1
+
+    if(props.traverseTarget){
+      const tgt=props.traverseTarget
+      const tgtElev=tgt.elevation_m??sampleDemAtLatLon(props.demTerrain,tgt.latitude_deg,tgt.longitude_deg).elevationM
+      rt.traverse.push(rt.viewer.entities.add({
+        id:'traverse-target',
+        position:terrainPosition(tgt.latitude_deg,tgt.longitude_deg,tgtElev,demOrigin,scale,18),
+        point:{pixelSize:12,color:C.Color.fromCssColorString('#f472b6'),outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+      }))
+    }
+
+    const waypoints=props.traverseWaypoints??[]
+    if(waypoints.length>=1){
+      if(waypoints.length>=2){
+        const pathPositions=waypoints.map(wp=>terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,8))
+        rt.traverse.push(rt.viewer.entities.add({
+          id:'traverse-path',
+          polyline:{positions:pathPositions,width:3.5,material:C.Color.fromCssColorString('#22d3ee')},
+        }))
+      }
+      for(const wp of waypoints){
+        rt.traverse.push(rt.viewer.entities.add({
+          id:`traverse-wp:${wp.waypoint_index}`,
+          position:terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,10),
+          point:{pixelSize:wp.waypoint_index===0?9:7,color:wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        }))
+      }
+    }
+
+    const candidates=props.traverseCandidates??[]
+    if(candidates.length>0){
+      const originWp=waypoints.length>0?waypoints[waypoints.length-1]:null
+      const originPos=originWp
+        ?terrainPosition(originWp.coordinates.latitude_deg,originWp.coordinates.longitude_deg,originWp.coordinates.elevation_m,demOrigin,scale,8)
+        :props.focusCoordinates
+          ?terrainPosition(props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg,sampleDemAtLatLon(props.demTerrain,props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg).elevationM,demOrigin,scale,8)
+          :null
+      for(const cand of candidates){
+        const colorCss=!cand.is_valid?'#ef4444':cand.slope_band==='SAFE'?'#10b981':'#f59e0b'
+        const candPos=terrainPosition(cand.coordinates.latitude_deg,cand.coordinates.longitude_deg,cand.coordinates.elevation_m,demOrigin,scale,12)
+        if(originPos&&cand.is_valid){
+          rt.traverse.push(rt.viewer.entities.add({
+            id:`traverse-cand-ray:${cand.candidate_id}`,
+            polyline:{positions:[originPos,candPos],width:1.5,material:C.Color.fromCssColorString(colorCss).withAlpha(0.55)},
+          }))
+        }
+        rt.traverse.push(rt.viewer.entities.add({
+          id:`traverse-cand:${cand.candidate_id}`,
+          position:candPos,
+          point:{pixelSize:10,color:C.Color.fromCssColorString(colorCss),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        }))
+      }
+    }
+    rt.viewer.scene.requestRender()
+  },[ready,props.traverseTarget,props.traverseWaypoints,props.traverseCandidates,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
+
   return <div className="absolute inset-0" aria-label="Cesium lunar imagery and verified terrain">
     <div ref={host} className="absolute inset-0"/>
     <div className="absolute bottom-7 left-3 z-10 max-w-[65vw] pointer-events-none text-[8px] sm:text-[9px] font-mono-tech text-slate-400 leading-relaxed" role="status">
-      {error?`Viewer issue: ${error}`:props.desiredCameraMode==='SURFACE'&&!verified?'Verified local terrain unavailable at this selection. Showing imagery on the lunar reference sphere.':verified&&props.desiredCameraMode==='SURFACE'?`Site01 LOLA · ${props.verticalScale}× height · ${matching?'recorded Sun/Earth directions':'celestial overlays withheld: observer mismatch or preview data'}. Imagery lighting is baked, not calculated shadows.`:message}
+      {error?`Viewer issue: ${error}`:props.pickingTraverseTarget?'CLICK TARGET ON 3D MAP: Select your Research Destination on the lunar terrain.':props.desiredCameraMode==='SURFACE'&&!hasDemPatch?'Verified local terrain unavailable at this selection. Showing imagery on the lunar reference sphere.':hasDemPatch&&props.desiredCameraMode==='SURFACE'?`${props.demTerrain?.metadata.site_id ?? 'LOLA'} · ${props.verticalScale}× height · ${matching?'recorded Sun/Earth directions':'celestial overlays withheld outside canonical Site01'}. Imagery lighting is baked, not calculated shadows.`:message}
     </div>
   </div>
 }

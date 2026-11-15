@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronUp,
   Compass,
+  Crosshair,
   Download,
   ExternalLink,
   Eye,
@@ -12,10 +13,13 @@ import {
   Globe,
   Info,
   Layers,
+  Navigation,
   Pause,
   Play,
+  RotateCcw,
   Search,
   Sparkles,
+  Undo2,
   X,
 } from 'lucide-react'
 import {
@@ -28,8 +32,19 @@ import {
   loadCatalogSiteWorkspace,
   normalizeLongitudeDeg,
   POLAR_LANDMARKS,
+  requestTraverseAutomatic,
+  requestTraverseManual,
+  sampleDemAtLatLon,
+  sphericalDestination,
+  sphericalDistanceAndBearing,
 } from './api/client'
-import type { CatalogSiteEntry, LoadedSiteWorkspace } from './api/types'
+import type {
+  CatalogSiteEntry,
+  LoadedSiteWorkspace,
+  TraverseAutomaticResponse,
+  TraverseManualCandidate,
+  TraverseWaypoint,
+} from './api/types'
 import { HorizonProfileCanvas } from './features/analysis/HorizonProfileCanvas'
 import {
   CesiumLunarStage,
@@ -136,6 +151,25 @@ export function App() {
   const searchWrapperRef = useRef<HTMLDivElement>(null)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
+  // Lunar Rover Traverse Planner state (Manual & Automatic modes)
+  const [traverseOpen, setTraverseOpen] = useState(true)
+  const [traverseMode, setTraverseMode] = useState<'manual' | 'automatic'>('manual')
+  const [traverseTarget, setTraverseTarget] = useState<{
+    id: string
+    label: string
+    latitude_deg: number
+    longitude_deg: number
+    elevation_m: number
+  } | null>(null)
+  const [pickingTraverseTarget, setPickingTraverseTarget] = useState(false)
+  const [traverseStepDistanceM, setTraverseStepDistanceM] = useState(250)
+  const [traverseWaypoints, setTraverseWaypoints] = useState<TraverseWaypoint[]>([])
+  const [traverseCandidates, setTraverseCandidates] = useState<TraverseManualCandidate[]>([])
+  const [traverseAutoResult, setTraverseAutoResult] = useState<TraverseAutomaticResponse | null>(null)
+  const [traverseLoading, setTraverseLoading] = useState(false)
+  const traverseRequestSeq = useRef(0)
+  const traverseSectionRef = useRef<HTMLElement>(null)
+
   const selectCatalogSite = useCallback(
     async (site: CatalogSiteEntry, zoomSurface = true, mastOverride?: 2 | 5) => {
       const sequence = ++requestSequence.current
@@ -220,6 +254,10 @@ export function App() {
     setHighlightedCandidateId(null)
     setDiffHighlightAzimuth(null)
     setShowProvenanceInfo(false)
+    setPickingTraverseTarget(false)
+    setTraverseWaypoints([])
+    setTraverseCandidates([])
+    setTraverseAutoResult(null)
     setDesiredCameraMode('ORBITAL')
     setCameraPresetNonce(n => n + 1)
   }, [])
@@ -439,9 +477,322 @@ export function App() {
     [workspace?.target.latitude_deg, workspace?.target.longitude_deg],
   )
 
+  const traversePresetTargets = useMemo(() => {
+    if (!workspace) return []
+    const baseLat = workspace.target.latitude_deg
+    const baseLon = workspace.target.longitude_deg
+    const dem = workspace.demTerrain
+    const psrSe = sphericalDestination(baseLat, baseLon, 135, 750)
+    const ridgeN = sphericalDestination(baseLat, baseLon, 0, 600)
+    const presets = [
+      {
+        id: 'psr-se-750',
+        label: 'PSR Cold Trap Rim (~750m SE)',
+        latitude_deg: psrSe.lat,
+        longitude_deg: psrSe.lon,
+        elevation_m: sampleDemAtLatLon(dem, psrSe.lat, psrSe.lon).elevationM,
+      },
+      {
+        id: 'ridge-n-600',
+        label: 'North Ridge Outcrop (~600m N)',
+        latitude_deg: ridgeN.lat,
+        longitude_deg: ridgeN.lon,
+        elevation_m: sampleDemAtLatLon(dem, ridgeN.lat, ridgeN.lon).elevationM,
+      },
+    ]
+    for (const cand of workspace.recommendations?.candidates ?? []) {
+      if (cand.distance_m >= 150) {
+        const cleanName = cand.site_id.replace(/^site\d+_[a-z_]+_/, '').replaceAll('_', ' ')
+        presets.push({
+          id: `rec:${cand.site_id}`,
+          label: `${cleanName.toUpperCase()} (${Math.round(cand.distance_m)}m · ${cand.slope_deg.toFixed(1)}°)`,
+          latitude_deg: cand.coordinates.latitude_deg,
+          longitude_deg: cand.coordinates.longitude_deg,
+          elevation_m: cand.coordinates.elevation_m,
+        })
+      }
+    }
+    return presets
+  }, [workspace])
+
+  const makeBasePodWaypoint = useCallback(
+    (
+      ws: LoadedSiteWorkspace,
+      target: { latitude_deg: number; longitude_deg: number } | null,
+      illumFraction: number,
+    ): TraverseWaypoint => {
+      const elev =
+        ws.demTerrain !== null
+          ? sampleDemAtLatLon(ws.demTerrain, ws.target.latitude_deg, ws.target.longitude_deg).elevationM
+          : ws.target.elevation_m
+      const distToTarget = target
+        ? sphericalDistanceAndBearing(
+            ws.target.latitude_deg,
+            ws.target.longitude_deg,
+            target.latitude_deg,
+            target.longitude_deg,
+          ).distanceM
+        : 0
+      return {
+        waypoint_index: 0,
+        coordinates: {
+          latitude_deg: ws.target.latitude_deg,
+          longitude_deg: ws.target.longitude_deg,
+          elevation_m: Number(elev.toFixed(1)),
+        },
+        distance_from_start_m: 0,
+        distance_to_target_m: Number(distToTarget.toFixed(1)),
+        slope_deg: Number((ws.effectiveSlopeDeg ?? 0).toFixed(1)),
+        illumination_fraction: Number(illumFraction.toFixed(3)),
+        battery_wh: 1000.0,
+        battery_reserve_pct: 83.3,
+        los_to_base: true,
+        action: 'START_BASE_POD',
+      }
+    },
+    [],
+  )
+
+  // Initialize default research target & Base Pod waypoint whenever active site changes
+  useEffect(() => {
+    if (!workspace) {
+      setTraverseTarget(null)
+      setTraverseWaypoints([])
+      setTraverseCandidates([])
+      setTraverseAutoResult(null)
+      setPickingTraverseTarget(false)
+      return
+    }
+    const initialTarget = traversePresetTargets[0] ?? null
+    setTraverseTarget(initialTarget)
+    setPickingTraverseTarget(false)
+    setTraverseAutoResult(null)
+    setTraverseCandidates([])
+    const initIllum = workspace.analysis.samples[0]?.sun.illumination_fraction ?? 1.0
+    setTraverseWaypoints([makeBasePodWaypoint(workspace, initialTarget, initIllum)])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace?.target.id, traversePresetTargets, makeBasePodWaypoint])
+
+  // Manual Mode: fetch next forward candidate points whenever current waypoint or target changes
+  const activeSunAz = currentSample?.sun.azimuth_deg ?? 180.0
+  const activeSunEl = currentSample?.sun.elevation_deg ?? 1.0
+  const latestWaypoint = traverseWaypoints[traverseWaypoints.length - 1] ?? null
+
+  useEffect(() => {
+    if (!traverseOpen || traverseMode !== 'manual' || !workspace || !traverseTarget || !latestWaypoint) {
+      return
+    }
+    if (
+      latestWaypoint.action === 'ARRIVE_RESEARCH_TARGET' ||
+      latestWaypoint.distance_to_target_m <= traverseStepDistanceM * 0.5
+    ) {
+      setTraverseCandidates([])
+      return
+    }
+    const seq = ++traverseRequestSeq.current
+    setTraverseLoading(true)
+    void requestTraverseManual(
+      {
+        current_latitude_deg: latestWaypoint.coordinates.latitude_deg,
+        current_longitude_deg: latestWaypoint.coordinates.longitude_deg,
+        target_latitude_deg: traverseTarget.latitude_deg,
+        target_longitude_deg: traverseTarget.longitude_deg,
+        base_latitude_deg: workspace.target.latitude_deg,
+        base_longitude_deg: workspace.target.longitude_deg,
+        current_battery_wh: latestWaypoint.battery_wh,
+        step_distance_m: traverseStepDistanceM,
+        num_candidates: 6,
+        sun_azimuth_deg: activeSunAz,
+        sun_elevation_deg: activeSunEl,
+      },
+      workspace.demTerrain,
+      workspace.analysis.horizon,
+    )
+      .then(res => {
+        if (seq !== traverseRequestSeq.current) return
+        setTraverseCandidates(res.candidates)
+      })
+      .finally(() => {
+        if (seq === traverseRequestSeq.current) setTraverseLoading(false)
+      })
+  }, [
+    traverseOpen,
+    traverseMode,
+    workspace,
+    traverseTarget,
+    latestWaypoint,
+    traverseStepDistanceM,
+    activeSunAz,
+    activeSunEl,
+  ])
+
+  // Automatic Mode: compute optimal full path in one go from Base Pod to Research Target
+  const runAutomaticTraversePlan = useCallback(() => {
+    if (!workspace || !traverseTarget) return
+    const seq = ++traverseRequestSeq.current
+    setTraverseLoading(true)
+    setTraverseCandidates([])
+    void requestTraverseAutomatic(
+      {
+        start_latitude_deg: workspace.target.latitude_deg,
+        start_longitude_deg: workspace.target.longitude_deg,
+        target_latitude_deg: traverseTarget.latitude_deg,
+        target_longitude_deg: traverseTarget.longitude_deg,
+        base_latitude_deg: workspace.target.latitude_deg,
+        base_longitude_deg: workspace.target.longitude_deg,
+        initial_battery_wh: 1000.0,
+        step_m: traverseStepDistanceM,
+        max_steps: 40,
+        sun_azimuth_deg: activeSunAz,
+        sun_elevation_deg: activeSunEl,
+      },
+      workspace.demTerrain,
+      workspace.analysis.horizon,
+    )
+      .then(res => {
+        if (seq !== traverseRequestSeq.current) return
+        setTraverseAutoResult(res)
+        setTraverseWaypoints(res.waypoints)
+      })
+      .finally(() => {
+        if (seq === traverseRequestSeq.current) setTraverseLoading(false)
+      })
+  }, [workspace, traverseTarget, traverseStepDistanceM, activeSunAz, activeSunEl])
+
+  useEffect(() => {
+    if (!traverseOpen || traverseMode !== 'automatic' || !workspace || !traverseTarget) return
+    runAutomaticTraversePlan()
+  }, [traverseOpen, traverseMode, workspace, traverseTarget, runAutomaticTraversePlan])
+
+  const handleSelectManualCandidate = useCallback(
+    (cand: TraverseManualCandidate) => {
+      if (!cand.is_valid || traverseMode !== 'manual') return
+      setTraverseWaypoints(prev => {
+        const last = prev[prev.length - 1]
+        const prevDist = last?.distance_from_start_m ?? 0
+        const nextIdx = prev.length
+        return [
+          ...prev,
+          {
+            waypoint_index: nextIdx,
+            coordinates: cand.coordinates,
+            distance_from_start_m: Number((prevDist + cand.step_distance_m).toFixed(1)),
+            distance_to_target_m: cand.distance_to_target_m,
+            slope_deg: cand.slope_deg,
+            illumination_fraction: cand.illumination_fraction,
+            battery_wh: cand.battery_wh,
+            battery_reserve_pct: cand.battery_reserve_pct,
+            los_to_base: cand.los_to_base,
+            action: `STEP_${nextIdx}`,
+          },
+        ]
+      })
+    },
+    [traverseMode],
+  )
+
+  const handleCompleteManualArrival = useCallback(() => {
+    if (!workspace || !traverseTarget) return
+    setTraverseWaypoints(prev => {
+      const last = prev[prev.length - 1]
+      if (!last || last.action === 'ARRIVE_RESEARCH_TARGET') return prev
+      const remDist = sphericalDistanceAndBearing(
+        last.coordinates.latitude_deg,
+        last.coordinates.longitude_deg,
+        traverseTarget.latitude_deg,
+        traverseTarget.longitude_deg,
+      ).distanceM
+      return [
+        ...prev,
+        {
+          waypoint_index: prev.length,
+          coordinates: {
+            latitude_deg: Number(traverseTarget.latitude_deg.toFixed(6)),
+            longitude_deg: Number(traverseTarget.longitude_deg.toFixed(6)),
+            elevation_m: Number(traverseTarget.elevation_m.toFixed(1)),
+          },
+          distance_from_start_m: Number((last.distance_from_start_m + remDist).toFixed(1)),
+          distance_to_target_m: 0,
+          slope_deg: last.slope_deg,
+          illumination_fraction: last.illumination_fraction,
+          battery_wh: last.battery_wh,
+          battery_reserve_pct: last.battery_reserve_pct,
+          los_to_base: last.los_to_base,
+          action: 'ARRIVE_RESEARCH_TARGET',
+        },
+      ]
+    })
+  }, [workspace, traverseTarget])
+
+  const handleUndoTraverseStep = useCallback(() => {
+    setTraverseWaypoints(prev => (prev.length > 1 ? prev.slice(0, -1) : prev))
+  }, [])
+
+  const handleResetTraverse = useCallback(() => {
+    if (!workspace) return
+    const illum = currentSample?.sun.illumination_fraction ?? 1.0
+    setTraverseAutoResult(null)
+    setTraverseWaypoints([makeBasePodWaypoint(workspace, traverseTarget, illum)])
+    if (traverseMode === 'automatic') {
+      runAutomaticTraversePlan()
+    }
+  }, [workspace, currentSample, makeBasePodWaypoint, traverseTarget, traverseMode, runAutomaticTraversePlan])
+
+  const handleSelectTraverseTarget = useCallback(
+    (nextTarget: { id: string; label: string; latitude_deg: number; longitude_deg: number; elevation_m: number }) => {
+      setTraverseTarget(nextTarget)
+      setPickingTraverseTarget(false)
+      setTraverseAutoResult(null)
+      if (workspace) {
+        const illum = currentSample?.sun.illumination_fraction ?? 1.0
+        setTraverseWaypoints([makeBasePodWaypoint(workspace, nextTarget, illum)])
+      }
+    },
+    [workspace, currentSample, makeBasePodWaypoint],
+  )
+
+  const handlePickTraverseTargetFromMap = useCallback(
+    (coords: { latitude_deg: number; longitude_deg: number; elevation_m: number }) => {
+      handleSelectTraverseTarget({
+        id: `custom:${coords.latitude_deg.toFixed(4)},${coords.longitude_deg.toFixed(4)}`,
+        label: `Custom Target (${formatLatLonCompact(coords.latitude_deg, coords.longitude_deg)})`,
+        latitude_deg: coords.latitude_deg,
+        longitude_deg: coords.longitude_deg,
+        elevation_m: coords.elevation_m,
+      })
+    },
+    [handleSelectTraverseTarget],
+  )
+
+  const handleSwitchTraverseMode = useCallback(
+    (nextMode: 'manual' | 'automatic') => {
+      if (nextMode === traverseMode) return
+      setTraverseMode(nextMode)
+      if (nextMode === 'manual' && workspace) {
+        setTraverseAutoResult(null)
+        const illum = currentSample?.sun.illumination_fraction ?? 1.0
+        setTraverseWaypoints([makeBasePodWaypoint(workspace, traverseTarget, illum)])
+      }
+    },
+    [traverseMode, workspace, currentSample, makeBasePodWaypoint, traverseTarget],
+  )
+
+  const handleLaunchRoverPlanner = useCallback(() => {
+    setDetailsVisible(true)
+    setLeftSidebarOpen(true)
+    setTraverseOpen(true)
+    if (!workspace) {
+      void selectCatalogSite(CATALOG_SITES[0], true)
+      return
+    }
+    window.setTimeout(() => {
+      traverseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 60)
+  }, [workspace, selectCatalogSite])
+
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
-      {/* Cesium lunar sphere with streamed LROC imagery and the verified local Site01 grid */}
+      {/* Cesium lunar sphere with streamed LROC imagery and verified local LOLA grids */}
       <CesiumLunarStage
         catalogSites={CATALOG_SITES}
         selectedSiteId={workspace?.target.catalogEntry?.id ?? null}
@@ -462,6 +813,12 @@ export function App() {
         showWireframe={showWireframe}
         verticalScale={verticalScale}
         observerHeightM={observerHeightM}
+        traverseWaypoints={traverseOpen ? traverseWaypoints : []}
+        traverseCandidates={traverseOpen && traverseMode === 'manual' ? traverseCandidates : []}
+        traverseTarget={traverseOpen ? traverseTarget : null}
+        pickingTraverseTarget={pickingTraverseTarget}
+        onSelectTraverseCandidate={handleSelectManualCandidate}
+        onPickTraverseTarget={handlePickTraverseTargetFromMap}
         onCameraModeChange={setCameraMode}
         onPickPoint={handlePickPoint}
         onSelectCatalogSite={site => void selectCatalogSite(site, true)}
@@ -472,7 +829,7 @@ export function App() {
       {/* Top Floating Search & Camera Control Pill */}
       <div
         ref={searchWrapperRef}
-        className="fixed top-4 left-1/2 -translate-x-1/2 z-30 w-[95vw] max-w-[760px]"
+        className="fixed top-4 left-1/2 -translate-x-1/2 z-30 w-[95vw] max-w-[820px]"
       >
         <div className="glass-hud rounded-full px-3 sm:px-4 py-1.5 sm:py-2 flex items-center gap-1.5 sm:gap-2 shadow-[0_12px_40px_rgba(0,0,0,0.68)] transition-colors focus-within:border-white/25">
           <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -629,6 +986,22 @@ export function App() {
           >
             <Compass className="w-3 h-3" />
             <span className="hidden sm:inline">2D</span>
+          </button>
+
+          {/* Rover Traverse Planner Launch / Focus Button */}
+          <button
+            type="button"
+            title="Open Lunar Rover Traverse Planner (Manual & Automatic Modes)"
+            onClick={handleLaunchRoverPlanner}
+            aria-pressed={Boolean(workspace && traverseOpen)}
+            className={`shrink-0 px-2.5 py-1 rounded-full text-[9px] font-mono-tech tracking-[0.12em] uppercase border transition flex items-center gap-1 ${
+              workspace && traverseOpen
+                ? 'border-emerald-400/45 bg-emerald-400/15 text-emerald-200'
+                : 'border-white/10 bg-white/[0.04] text-slate-300 hover:text-white hover:border-white/25'
+            }`}
+          >
+            <Navigation className="w-3 h-3 text-emerald-400" />
+            <span className="hidden sm:inline">ROVER</span>
           </button>
 
           {/* Master Hide / Show HUD Pill */}
@@ -1000,7 +1373,364 @@ export function App() {
               </button>
             </section>
 
-            {/* Section 2: Safe Haven Recommender */}
+            {/* Section 2: Lunar Rover Traverse Planner (Manual & Automatic Modes) */}
+            <section ref={traverseSectionRef} className="space-y-2.5 pt-2 border-t border-white/[0.07]">
+              <button
+                type="button"
+                onClick={() => setTraverseOpen(o => !o)}
+                className="w-full flex items-center justify-between text-[9px] font-mono-tech tracking-[0.16em] text-slate-300 hover:text-white uppercase transition"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <Navigation className="w-3 h-3 text-emerald-400" />
+                  Rover Traverse Planner
+                </span>
+                <span className="inline-flex items-center gap-1.5 text-slate-400">
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-400/10 border border-emerald-400/30 text-[8px] text-emerald-300">
+                    {traverseMode === 'manual' ? 'MANUAL' : 'AUTO'}
+                  </span>
+                  {traverseOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </span>
+              </button>
+
+              {traverseOpen && (
+                <div className="space-y-2.5 rounded-xl border border-white/[0.08] bg-black/35 p-2.5">
+                  {/* Mode Switcher */}
+                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-white/[0.03] p-0.5 border border-white/[0.06]">
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchTraverseMode('manual')}
+                      className={`px-2 py-1 rounded-md text-[9px] font-mono-tech uppercase tracking-wider transition ${
+                        traverseMode === 'manual'
+                          ? 'bg-emerald-400/20 text-emerald-200 border border-emerald-400/40'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Manual Mode
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchTraverseMode('automatic')}
+                      className={`px-2 py-1 rounded-md text-[9px] font-mono-tech uppercase tracking-wider transition ${
+                        traverseMode === 'automatic'
+                          ? 'bg-cyan-400/20 text-cyan-200 border border-cyan-400/40'
+                          : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Auto Mode
+                    </button>
+                  </div>
+
+                  {/* Research Target Area Selector */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[8px] font-mono-tech uppercase tracking-[0.14em] text-slate-400">
+                      <span>Research Target Destination</span>
+                      {latestWaypoint && (
+                        <span className="text-pink-300 tabular-nums">
+                          {Math.round(latestWaypoint.distance_to_target_m).toLocaleString()}m away
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <select
+                        aria-label="Research Target Destination"
+                        value={
+                          traversePresetTargets.some(p => p.id === traverseTarget?.id)
+                            ? traverseTarget?.id
+                            : 'custom'
+                        }
+                        onChange={e => {
+                          const found = traversePresetTargets.find(p => p.id === e.target.value)
+                          if (found) handleSelectTraverseTarget(found)
+                        }}
+                        className="flex-1 min-w-0 bg-[#0b0e14] border border-white/10 rounded-lg px-2 py-1 text-[9px] font-mono-tech text-slate-200 focus:outline-none focus:border-cyan-400/50"
+                      >
+                        {traversePresetTargets.map(preset => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))}
+                        {traverseTarget && !traversePresetTargets.some(p => p.id === traverseTarget.id) && (
+                          <option value="custom">{traverseTarget.label}</option>
+                        )}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setPickingTraverseTarget(p => !p)}
+                        title="Click any point on the 3D globe or DEM patch to set your Research Destination"
+                        className={`shrink-0 px-2 py-1 rounded-lg text-[8px] font-mono-tech uppercase border transition inline-flex items-center gap-1 ${
+                          pickingTraverseTarget
+                            ? 'border-pink-400 bg-pink-500/20 text-pink-200 animate-pulse'
+                            : 'border-white/10 bg-white/[0.04] text-slate-300 hover:border-pink-400/50 hover:text-pink-200'
+                        }`}
+                      >
+                        <Crosshair className="w-2.5 h-2.5" />
+                        {pickingTraverseTarget ? 'PICKING…' : 'PICK MAP'}
+                      </button>
+                    </div>
+                    {traverseTarget && (
+                      <div className="text-[8px] font-mono-tech text-slate-500 tabular-nums flex items-center justify-between">
+                        <span>{formatLatLonCompact(traverseTarget.latitude_deg, traverseTarget.longitude_deg)}</span>
+                        <span>Elev {Math.round(traverseTarget.elevation_m)} m</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Rover Power, Solar & Base Pod LOS Status Bar */}
+                  {latestWaypoint && (
+                    <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] p-2">
+                      <div>
+                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Battery</div>
+                        <div
+                          className={`text-[10px] font-mono-tech tabular-nums mt-0.5 ${
+                            latestWaypoint.battery_reserve_pct >= 50
+                              ? 'text-emerald-300'
+                              : latestWaypoint.battery_reserve_pct >= 20
+                                ? 'text-amber-300'
+                                : 'text-rose-400'
+                          }`}
+                        >
+                          {Math.round(latestWaypoint.battery_wh)} Wh ({Math.round(latestWaypoint.battery_reserve_pct)}%)
+                        </div>
+                        <div className="w-full h-1 rounded-full bg-white/10 mt-1 overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              latestWaypoint.battery_reserve_pct >= 50
+                                ? 'bg-emerald-400'
+                                : latestWaypoint.battery_reserve_pct >= 20
+                                  ? 'bg-amber-400'
+                                  : 'bg-rose-500'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, latestWaypoint.battery_reserve_pct))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Solar Regen</div>
+                        <div className="text-[10px] font-mono-tech text-amber-300 tabular-nums mt-0.5">
+                          {Math.round(latestWaypoint.illumination_fraction * 100)}% Sun
+                        </div>
+                        <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
+                          +{Math.round(350 * latestWaypoint.illumination_fraction)}W max
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Base Pod LoS</div>
+                        <div
+                          className={`text-[10px] font-mono-tech uppercase mt-0.5 ${
+                            latestWaypoint.los_to_base ? 'text-emerald-400' : 'text-rose-400'
+                          }`}
+                        >
+                          {latestWaypoint.los_to_base ? 'LINK UP' : 'BLOCKED'}
+                        </div>
+                        <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
+                          Step #{latestWaypoint.waypoint_index}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step Size & Actions Row */}
+                  <div className="flex items-center justify-between gap-1.5">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[8px] font-mono-tech text-slate-500 uppercase">Step</span>
+                      {([150, 250, 400] as const).map(sz => (
+                        <button
+                          key={sz}
+                          type="button"
+                          onClick={() => setTraverseStepDistanceM(sz)}
+                          className={`px-1.5 py-0.5 rounded text-[8px] font-mono-tech border transition ${
+                            traverseStepDistanceM === sz
+                              ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                              : 'border-white/10 text-slate-400 hover:text-white'
+                          }`}
+                        >
+                          {sz}m
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {traverseMode === 'manual' && traverseWaypoints.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={handleUndoTraverseStep}
+                          className="px-1.5 py-0.5 rounded text-[8px] font-mono-tech uppercase border border-white/10 bg-white/[0.04] text-slate-300 hover:text-white inline-flex items-center gap-0.5"
+                        >
+                          <Undo2 className="w-2.5 h-2.5" />
+                          Undo
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleResetTraverse}
+                        className="px-1.5 py-0.5 rounded text-[8px] font-mono-tech uppercase border border-white/10 bg-white/[0.04] text-slate-300 hover:text-white inline-flex items-center gap-0.5"
+                      >
+                        <RotateCcw className="w-2.5 h-2.5" />
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* MANUAL MODE BODY */}
+                  {traverseMode === 'manual' && (
+                    <div className="space-y-1.5">
+                      {latestWaypoint?.action === 'ARRIVE_RESEARCH_TARGET' ? (
+                        <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-2 text-[9px] font-mono-tech text-emerald-200">
+                          Arrived at Research Destination ({Math.round(latestWaypoint.distance_from_start_m)}m total traverse ·{' '}
+                          {Math.round(latestWaypoint.battery_wh)} Wh remaining).
+                        </div>
+                      ) : latestWaypoint && latestWaypoint.distance_to_target_m <= traverseStepDistanceM * 0.75 ? (
+                        <button
+                          type="button"
+                          onClick={handleCompleteManualArrival}
+                          className="w-full py-2 px-3 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-[9px] font-mono-tech uppercase tracking-wider text-emerald-200 transition"
+                        >
+                          Touchdown at Research Target ({Math.round(latestWaypoint.distance_to_target_m)}m remaining)
+                        </button>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between text-[8px] font-mono-tech uppercase tracking-wider text-slate-400">
+                            <span>Suggested Next Waypoints</span>
+                            {traverseLoading && <span className="text-cyan-300">Evaluating…</span>}
+                          </div>
+                          {traverseCandidates.length > 0 ? (
+                            <div className="space-y-1 max-h-[195px] overflow-y-auto hud-scroll pr-0.5">
+                              {traverseCandidates.map(cand => {
+                                const bandCls =
+                                  !cand.is_valid
+                                    ? 'border-rose-500/35 bg-rose-500/5 text-rose-300 opacity-75'
+                                    : cand.slope_band === 'SAFE'
+                                      ? 'border-emerald-400/25 bg-white/[0.03] hover:bg-emerald-400/10 hover:border-emerald-400/50'
+                                      : 'border-amber-400/30 bg-white/[0.03] hover:bg-amber-400/10'
+                                return (
+                                  <button
+                                    key={cand.candidate_id}
+                                    type="button"
+                                    disabled={!cand.is_valid}
+                                    onClick={() => handleSelectManualCandidate(cand)}
+                                    className={`w-full text-left rounded-lg p-2 border transition ${bandCls}`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1 text-[9px] font-mono-tech">
+                                      <span className="text-slate-100 tabular-nums">
+                                        {Math.round(cand.step_distance_m)}m @ {Math.round(cand.step_bearing_deg)}°
+                                      </span>
+                                      <span className="text-pink-300 tabular-nums">
+                                        {Math.round(cand.distance_to_target_m)}m to target
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-[8px] font-mono-tech mt-1 tabular-nums text-slate-400">
+                                      <span
+                                        className={
+                                          cand.slope_band === 'SAFE'
+                                            ? 'text-emerald-400'
+                                            : cand.slope_band === 'CAUTION'
+                                              ? 'text-amber-300'
+                                              : 'text-rose-400'
+                                        }
+                                      >
+                                        {cand.slope_deg.toFixed(1)}° {cand.slope_band}
+                                      </span>
+                                      <span className="text-amber-300">
+                                        {Math.round(cand.illumination_fraction * 100)}% Sun
+                                      </span>
+                                      <span>
+                                        {Math.round(cand.battery_wh)}Wh ({cand.battery_delta_wh >= 0 ? '+' : ''}
+                                        {cand.battery_delta_wh.toFixed(0)})
+                                      </span>
+                                      <span className={cand.los_to_base ? 'text-emerald-400' : 'text-rose-400'}>
+                                        {cand.los_to_base ? 'LOS OK' : 'NO LOS'}
+                                      </span>
+                                    </div>
+                                    {!cand.is_valid && cand.rejection_reasons.length > 0 && (
+                                      <div className="text-[8px] font-mono-tech text-rose-400 mt-0.5">
+                                        {cand.rejection_reasons[0]}
+                                      </div>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          ) : (
+                            <div className="text-[9px] font-mono-tech text-slate-400 py-1">
+                              {traverseLoading ? 'Computing candidate steps…' : 'Select or pick a research destination above.'}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* AUTOMATIC MODE BODY */}
+                  {traverseMode === 'automatic' && (
+                    <div className="space-y-2">
+                      <button
+                        type="button"
+                        onClick={runAutomaticTraversePlan}
+                        disabled={traverseLoading || !traverseTarget}
+                        className="w-full py-1.5 px-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/45 text-[9px] font-mono-tech uppercase tracking-wider text-cyan-200 transition disabled:opacity-50"
+                      >
+                        {traverseLoading ? 'Computing Optimal Traverse…' : 'Recompute Optimal Route'}
+                      </button>
+
+                      {traverseAutoResult && (
+                        <>
+                          <div className="grid grid-cols-3 gap-1 text-center rounded-lg bg-white/[0.03] border border-white/[0.06] p-1.5">
+                            <div>
+                              <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Status</div>
+                              <div
+                                className={`text-[9px] font-mono-tech uppercase ${
+                                  traverseAutoResult.status === 'OPTIMAL'
+                                    ? 'text-emerald-400'
+                                    : traverseAutoResult.status === 'FEASIBLE'
+                                      ? 'text-amber-300'
+                                      : 'text-rose-400'
+                                }`}
+                              >
+                                {traverseAutoResult.status}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Total Dist</div>
+                              <div className="text-[9px] font-mono-tech text-slate-200 tabular-nums">
+                                {Math.round(traverseAutoResult.summary.total_traverse_distance_m)}m
+                              </div>
+                            </div>
+                            <div>
+                              <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Base LoS</div>
+                              <div className="text-[9px] font-mono-tech text-cyan-300 tabular-nums">
+                                {Math.round(traverseAutoResult.summary.base_los_fraction * 100)}%
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1 max-h-[155px] overflow-y-auto hud-scroll pr-0.5">
+                            {traverseAutoResult.waypoints.map(wp => (
+                              <div
+                                key={wp.waypoint_index}
+                                className="flex items-center justify-between text-[8px] font-mono-tech rounded bg-white/[0.02] border border-white/[0.05] px-2 py-1 tabular-nums"
+                              >
+                                <span className="text-slate-300 truncate max-w-[92px]">
+                                  #{wp.waypoint_index} {wp.action === 'START_BASE_POD' ? 'BASE' : wp.action === 'ARRIVE_RESEARCH_TARGET' ? 'TARGET' : `WP ${wp.waypoint_index}`}
+                                </span>
+                                <span className="text-slate-400">{Math.round(wp.distance_to_target_m)}m rem</span>
+                                <span className={wp.slope_deg <= 8 ? 'text-emerald-400' : 'text-amber-300'}>
+                                  {wp.slope_deg.toFixed(1)}°
+                                </span>
+                                <span className="text-amber-300">{Math.round(wp.illumination_fraction * 100)}%☀</span>
+                                <span className={wp.los_to_base ? 'text-emerald-400' : 'text-rose-400'}>
+                                  {wp.los_to_base ? 'LOS' : 'BLK'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            {/* Section 3: Safe Haven Recommender */}
             <section className="space-y-2 pt-2 border-t border-white/[0.07]">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-mono-tech tracking-[0.16em] text-slate-500 uppercase">
@@ -1113,6 +1843,18 @@ export function App() {
                   <span className="w-3 h-[2px] bg-emerald-400 shrink-0" />
                   <span>Earth DTE Vector (Rose = Blocked)</span>
                 </div>
+                {traverseOpen && (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <span className="w-3 h-[2px] bg-cyan-400 shrink-0" />
+                      <span>Rover Traverse Path (3D Waypoints)</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-pink-400 shrink-0" />
+                      <span>Research Target Destination</span>
+                    </div>
+                  </>
+                )}
                 {workspace.recommendations && workspace.recommendations.candidates.length > 0 && (
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full border border-cyan-300 shrink-0" />

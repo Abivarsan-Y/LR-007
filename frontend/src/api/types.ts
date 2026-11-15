@@ -229,3 +229,83 @@ export interface LoadedSiteWorkspace {
   effectiveSlopeDeg: number | null
   effectiveSlopeBand: SlopeBand
 }
+
+export interface TraverseCoordinates {
+  latitude_deg: number
+  longitude_deg: number
+  elevation_m: number
+}
+
+export interface TraverseManualCandidate {
+  candidate_id: string
+  coordinates: TraverseCoordinates
+  step_bearing_deg: number
+  step_distance_m: number
+  distance_to_target_m: number
+  distance_progress_m: number
+  slope_deg: number
+  slope_band: SlopeBand
+  illumination_fraction: number
+  battery_wh: number
+  battery_reserve_pct: number
+  battery_delta_wh: number
+  los_to_base: boolean
+  los_clearance_m: number
+  is_valid: boolean
+  rejection_reasons: string[]
+  score: number
+}
+
+export interface TraverseManualResponse {
+  mode: 'manual'
+  current_position: {
+    latitude_deg: number
+    longitude_deg: number
+    elevation_m: number
+    slope_deg: number
+    battery_wh: number
+    los_to_base: boolean
+  }
+  target_destination: {
+    latitude_deg: number
+    longitude_deg: number
+    initial_distance_to_target_m: number
+  }
+  base_pod: {
+    latitude_deg: number
+    longitude_deg: number
+  }
+  candidates: TraverseManualCandidate[]
+}
+
+export interface TraverseWaypoint {
+  waypoint_index: number
+  coordinates: TraverseCoordinates
+  distance_from_start_m: number
+  distance_to_target_m: number
+  slope_deg: number
+  illumination_fraction: number
+  battery_wh: number
+  battery_reserve_pct: number
+  los_to_base: boolean
+  action: string
+}
+
+export interface TraverseAutomaticResponse {
+  mode: 'automatic'
+  status: 'OPTIMAL' | 'FEASIBLE' | 'BLOCKED'
+  start_coordinates: { latitude_deg: number; longitude_deg: number }
+  target_destination: { latitude_deg: number; longitude_deg: number }
+  base_pod: { latitude_deg: number; longitude_deg: number }
+  summary: {
+    total_waypoints: number
+    total_traverse_distance_m: number
+    max_slope_deg: number
+    avg_slope_deg: number
+    avg_illumination_fraction: number
+    min_battery_wh: number
+    final_battery_wh: number
+    base_los_fraction: number
+  }
+  waypoints: TraverseWaypoint[]
+}
