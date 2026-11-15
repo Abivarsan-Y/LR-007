@@ -1,35 +1,50 @@
 # HORIZON OPS (`LR-007`)
 
 **Lunar South Pole Landing Site, Mission Window, LunaDiff & Rover Traverse Navigator**  
-*2026 NASA Space Apps Challenge Submission — Team Lunar Rangers 007*
+*2026 NASA Space Apps Challenge Submission — Team Lunar Rangers 007 (`LR-007`)*
 
 ---
 
-## Project Demo
-<img width="1920" height="1048" alt="image" src="https://github.com/user-attachments/assets/171ba6ac-1386-4d07-a928-be8987899a78" />
-- **Project Presentation:** [docs/HORIZON_OPS_7_Slide_Demo.pdf](./docs/LR-007-HORIZON_OPS.pdf) ([public GitHub link]([https://github.com/Abivarsan-Y/LR-007/blob/main/docs/HORIZON_OPS_7_Slide_Demo.pdf](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/LR-007-HORIZON_OPS.pdf)))
+## Live Mission Cockpit & Project Demo
+
+- **Live Web Application (Google Firebase Hosting):** [`https://horizon-ops-lr-007.web.app`](https://horizon-ops-lr-007.web.app)
+- **7-Slide Project Demo Deck (PDF):** [`docs/LR-007-HORIZON_OPS.pdf`](./docs/LR-007-HORIZON_OPS.pdf) · [Open on GitHub](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/LR-007-HORIZON_OPS.pdf)
+
+<img width="1920" height="1048" alt="HORIZON OPS Mission Cockpit" src="https://github.com/user-attachments/assets/171ba6ac-1386-4d07-a928-be8987899a78" />
 
 ---
 
-## What HORIZON OPS Does
+## Core Capabilities
 
 1. **Interactive 3D Lunar South Pole Globe + Synchronized 2D Polar Map (`80°S–90°S`)**
-   - CesiumJS 3D South Polar visualization textured with **NASA LRO WAC (`luna_wac_global`)** via Lunaserv WMS, far-field 3D starfield, and seamless `129 × 129` (`20 m` spacing) **NASA LOLA DEM** terrain relief across four Artemis-era South Pole sites (`Connecting Ridge`, `Shackleton Rim`, `Malapert Mountain`, `Haworth Interior`) with camera elevation floor protection.
-2. **Artemis Slope Hazard Screening & Nearby Safe Haven Recommender**
-   - Evaluates local landing slopes using **SAFE (`< 8.0°`)**, **CAUTION (`8.0°–15.0°`)**, and **HAZARD (`> 15.0°`)** thresholds with switchable shaders.
-   - Scans concentric rings around unsafe points to recommend safer ridge flats (e.g., Connecting Ridge `Site 01`: `SH-1: 0.44°`, `SH-2: 2.61°`, `SH-3: 1.36°`).
+   - Combines a **CesiumJS** 3D lunar globe textured with **NASA LROC Wide Angle Camera (`luna_wac_global`)** imagery via Lunaserv WMS, a far-field 3D starfield, camera elevation floor guardrails, and seamless `129 × 129` (`20 m` spacing) **NASA LOLA DEM** terrain relief across four Artemis-era candidate sites (`Connecting Ridge`, `Shackleton Rim`, `Malapert Mountain`, `Haworth Interior`) alongside a synchronized 2D South Polar map.
+2. **Artemis Touchdown Slope Screening & Nearby Safe Haven Recommender**
+   - Evaluates local landing slopes using **SAFE (`< 8.0°`)**, **CAUTION (`8.0°–15.0°`)**, and **HAZARD (`> 15.0°`)** thresholds with switchable terrain shaders.
+   - Scans concentric rings around unsafe points (`5–20 km` / local patch envelope) to recommend flatter nearby ridge locations (e.g., Connecting Ridge `Site 01`: `SH-1: 0.44°`, `SH-2: 2.61°`, `SH-3: 1.36°`).
 3. **LunaDiff Engine (*"See What Changed. See Why."*) & Causal 360° Horizon Inspector**
    - Compares a Nominal launch window (`Nov 15, 2026`, `14` days) against launch delays (`+24h` / `+48h` / `+72h`) at `30-minute` cadence using curvature-adjusted 360° horizon ray-casting (`1,440` rays at `0.25°` spacing out to `150 km`, lunar radius $R = 1,737,400\,\text{m}$) and **NASA JPL Horizons `DE421`** (`MOON_ME_DE421`) Sun and Earth ephemerides.
-   - Verified Connecting Ridge (`Site 01`) `+48h` delay shift: **`-46.2 h` net sunlight**, **`+10.0 h` net Earth visibility**, linked directly to obstructing crater rim azimuths (e.g., `MET +216.0h`, `118.293°` SE rim at `1.534°` blocking the `1.255°` Sun).
+   - Verified Connecting Ridge (`Site 01`) `+48h` delay impact: **`-46.2 h` net sunlight** and **`+10.0 h` net Earth visibility**, linked directly to the exact obstructing crater rim azimuth (e.g., `MET +216.0h`, `118.293°` SE rim rising to `1.534°` blocking the `1.255°` Sun).
 4. **Energy- & LOS-Constrained Rover Traverse Planner (Manual & Automatic Modes)**
-   - Plans sorties from a landed Base Pod toward Permanently Shadowed Regions (PSRs) enforcing `≤ 15°` slope limits, `1,200 Wh` battery (`20%` safety floor), `150 W` drive draw, `350 W` peak solar charging, `0.5 m/s` cruise speed, dynamic synodic solar rotation (`+0.508°/h`), return-to-haven margin, and curvature-aware **`5 m` Base Pod mast to `2 m` rover mast** radio line-of-sight (LOS).
-   - Verified real **LOLA `LDEM_80S_80MPP_ADJ.TIF`** sortie result: `1,091.9 m` distance in `3.25 h`, executing `2` **`⚡ SOLAR_REGEN_HOLD`** stops (`2.06 h + 0.15 h` to `90.0%` SoC) and arriving inside `0%` sunlight PSR target at `84.9%` (`1,019.1 Wh`) battery and `100%` Base Pod LOS.
-5. **Reproducible Mission Exports & Offline Resilience**
-   - Exports auditable JSON and CSV packages with `MOON_ME_DE421` coordinates, SHA-256 dataset provenance, fail-closed `NaN -> UNKNOWN` handling, and interactive client-side replay backed by committed LOLA terrain binaries (`data/processed/`) and JPL Horizons fixtures (`backend/tests/fixtures/`).
+   - Plans sorties from a landed **Base Pod** (`5 m` comms mast) toward water-ice Permanently Shadowed Regions (PSRs), enforcing `≤ 15°` max slope, a `1,200 Wh` battery (`20%` safety reserve), `150 W` drive draw, `350 W` peak solar array charging, `0.5 m/s` cruise speed, dynamic synodic solar rotation (`+0.508°/h`), return-to-haven safety margin, and curvature-aware **`5 m` Base Pod to `2 m` rover mast** radio line-of-sight (LOS).
+   - Verified real **LOLA `LDEM_80S_80MPP_ADJ.TIF`** sortie result: `1,091.9 m` traverse in `3.25 h` with `2` autonomous **`⚡ SOLAR_REGEN_HOLD`** recharge stops (`2.06 h + 0.15 h` to `90.0%` SoC), arriving inside the `0%` sunlit PSR target at `84.9%` (`1,019.1 Wh`) battery and `100%` Base Pod LOS.
+5. **Reproducible Mission Exports & Zero-Backend Browser Fallback**
+   - Exports auditable **JSON** and **CSV** mission packages with `MOON_ME_DE421` coordinates, SHA-256 provenance records, and fail-closed `NaN -> UNKNOWN` semantics.
+   - Bundles processed LOLA `.bin` elevation meshes (`data/processed/`) and JPL Horizons fixtures (`backend/tests/fixtures/`) into the static frontend so terrain rendering, Safe Haven display, `Site 01` LunaDiff, and browser-side rover traverse planning work standalone without requiring a live Python process.
 
 ---
 
-## NASA Data, Space Agency Partner Resources & Engineering Sources
+## System Architecture & Tech Stack
+
+| Layer | Technologies |
+| :--- | :--- |
+| **Frontend & 3D Globe** | **React 19**, **TypeScript 5.9**, **Vite 7**, **Tailwind CSS v4**, **CesiumJS**, **Three.js** & **React Three Fiber**, **Recharts**, **Lucide React** |
+| **Backend & Geodesy** | **Python 3.14**, **FastAPI**, **Pydantic v2**, **Uvicorn**, **NumPy**, **SciPy**, **PyProj**, **Rasterio**, **Tifffile**, **ImageCodecs** |
+| **Contracts & Verification** | **JSON Schema Draft 2020-12** (`jsonschema`), **Pytest**, **Node.js Test Runner (`node --test`)** |
+| **Cloud & Hosting** | **Google Firebase Hosting** (`horizon-ops-lr-007.web.app`), **GitHub** |
+
+---
+
+## NASA Data, Space Agency Partner & Global Collaborator Sources
 
 ### NASA Datasets & Planetary Services
 - **NASA LRO LOLA South Polar DEMs (GSFC PGDA Product 90):** `LDEM_80S_80MPP_ADJ.TIF` (`7,600 × 7,600` float32, `80 m/px`) & `LDEM_80S_20MPP_ADJ.TIF` (`20 m/px`) — `https://pgda.gsfc.nasa.gov/products/90`
@@ -39,7 +54,10 @@
 - **NASA Moon Trek & LROC QuickMap:** Feature cross-verification and coordinate external links (`https://trek.nasa.gov/moon/`, `https://quickmap.lroc.im-ldi.com/`).
 
 ### 2026 NASA Space Apps Space Agency Partner Resource
-- **Canadian Space Agency (CSA) — Moon Exploration Portal:** Linked inside the mission external reference controls (`https://www.asc-csa.gc.ca/eng/astronomy/moon-exploration/`).
+- **Canadian Space Agency (CSA) — Moon Exploration Portal:** Integrated inside the mission external reference controls (`https://www.asc-csa.gc.ca/eng/astronomy/moon-exploration/`).
+
+### 2026 NASA Space Apps Global Collaborator
+- **Google:** Live web application deployment on **Google Firebase Hosting** (`https://horizon-ops-lr-007.web.app`), typography via **Google Fonts** (`Inter` & `JetBrains Mono`), and development assistance via **Google Antigravity**.
 
 ---
 
@@ -62,7 +80,7 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open Vite's printed local URL (`http://localhost:5173`). Processed LOLA site terrain binaries, 360° horizon profiles, Site 01 JPL Horizons cache fixtures, Safe Haven lookups, and client-side traverse planning work standalone even when the Python backend is offline. *(See [`frontend/README.md`](./frontend/README.md) for frontend details.)*
+Open Vite's printed local URL (`http://localhost:5173`). Processed LOLA site terrain binaries, 360° horizon profiles, Site 01 JPL Horizons cache fixtures, Safe Haven lookups, and client-side traverse planning remain functional even when the Python backend is stopped. *(See [`frontend/README.md`](./frontend/README.md) for frontend details.)*
 
 ### 3. Run the Verified Automated Test Suite (`184` Passing Checks)
 
@@ -84,9 +102,9 @@ npm --prefix frontend run build
 
 ## Super Intelligence (SI) Attribution & Disclosure
 
-Team **LR-007** originated the lunar south-pole challenge design, spherical curvature horizon math, LunaDiff launch-delay diagnostics, and constrained PSR rover traverse methodology independently, and used **Super Intelligence (SI)** software (**ChatGPT**, **OpenAI Codex**, and **Google Antigravity**) strictly as development and documentation assistants:
+Team **Lunar Rangers 007 (`LR-007`)** originated the lunar south-pole challenge design, spherical curvature horizon math, LunaDiff launch-delay diagnostics, and constrained PSR rover traverse methodology independently, and used **Super Intelligence (SI)** software (**ChatGPT**, **OpenAI Codex**, and **Google Antigravity**) strictly as development and documentation assistants:
 
 - **Assisted:** React/TypeScript UI panel scaffolding, CesiumJS tactical overlay helpers, FastAPI endpoint boilerplate, test authoring, and documentation formatting.
 - **Deterministic Runtime Physics:** Zero generative AI runs at runtime—every elevation, slope, 360° horizon obstruction, solar/Earth visibility fraction, and rover traverse trajectory is computed deterministically from verified NASA LOLA DEMs and JPL Horizons `DE421` ephemerides.
 - **Branding Compliance:** No NASA logos, flags, insignias, or mission identifiers were generated, modified, or included in any SI-assisted code, documentation, or presentation visuals.
-- **Embedded Project Disclosures:** Matching SI disclosures are included in [`frontend/index.html`](./frontend/index.html) (`<meta name="ai-disclosure" ...>`) and [`docs/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/HORIZON_OPS_7_Slide_Demo.pdf) slide footers.
+- **Embedded Project Disclosures:** Matching SI disclosures are included in [`frontend/index.html`](./frontend/index.html) (`<meta name="ai-disclosure" ...>`) and [`docs/LR-007-HORIZON_OPS.pdf`](./docs/LR-007-HORIZON_OPS.pdf) slide footers.
