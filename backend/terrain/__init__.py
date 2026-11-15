@@ -23,6 +23,14 @@ from .recommender import (
     recommend_safe_havens_from_dem,
     normalize_longitude,
 )
+from .traverse import (
+    suggest_next_waypoints,
+    plan_automatic_traverse,
+    check_surface_los,
+    compute_point_slope_deg,
+    compute_leg_power,
+    estimate_solar_illumination,
+)
 
 __all__ = [
     "R_MOON_M",
@@ -43,4 +51,10 @@ __all__ = [
     "find_safe_havens_from_grid",
     "recommend_safe_havens_from_dem",
     "normalize_longitude",
+    "suggest_next_waypoints",
+    "plan_automatic_traverse",
+    "check_surface_los",
+    "compute_point_slope_deg",
+    "compute_leg_power",
+    "estimate_solar_illumination",
 ]

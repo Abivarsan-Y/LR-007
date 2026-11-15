@@ -297,3 +297,40 @@ class ExportRequest(BaseModel):
         if "observer_height_m" in self.model_fields_set or self.observer is None:
             kwargs["observer_height_m"] = self.observer_height_m
         return AnalyzeScenarioRequest(**kwargs)
+
+
+class TraverseManualRequest(BaseModel):
+    """Request forward waypoint candidates in manual rover traverse mode."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    current_latitude_deg: float = Field(ge=-90.0, le=0.0)
+    current_longitude_deg: float = Field(ge=-180.0, le=360.0)
+    target_latitude_deg: float = Field(ge=-90.0, le=0.0)
+    target_longitude_deg: float = Field(ge=-180.0, le=360.0)
+    base_latitude_deg: float | None = Field(default=None, ge=-90.0, le=0.0)
+    base_longitude_deg: float | None = Field(default=None, ge=-180.0, le=360.0)
+    current_battery_wh: float = Field(default=1000.0, ge=0.0)
+    step_distance_m: float = Field(default=300.0, gt=0.0, le=5000.0)
+    num_candidates: int = Field(default=8, ge=2, le=24)
+    sun_azimuth_deg: float = Field(default=180.0, ge=0.0, lt=360.0)
+    sun_elevation_deg: float = Field(default=1.0, ge=-90.0, le=90.0)
+
+
+class TraverseAutomaticRequest(BaseModel):
+    """Request complete autonomous optimal traverse planning from start to target."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    start_latitude_deg: float = Field(ge=-90.0, le=0.0)
+    start_longitude_deg: float = Field(ge=-180.0, le=360.0)
+    target_latitude_deg: float = Field(ge=-90.0, le=0.0)
+    target_longitude_deg: float = Field(ge=-180.0, le=360.0)
+    base_latitude_deg: float | None = Field(default=None, ge=-90.0, le=0.0)
+    base_longitude_deg: float | None = Field(default=None, ge=-180.0, le=360.0)
+    initial_battery_wh: float = Field(default=1000.0, ge=0.0)
+    step_m: float = Field(default=250.0, gt=20.0, le=5000.0)
+    max_steps: int = Field(default=40, ge=1, le=100)
+    sun_azimuth_deg: float = Field(default=180.0, ge=0.0, lt=360.0)
+    sun_elevation_deg: float = Field(default=1.0, ge=-90.0, le=90.0)
+
