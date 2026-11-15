@@ -205,7 +205,17 @@ def compute_leg_power(
     travel_time_hours = distance_m / (rover_speed_mps * 3600.0)
     delta_wh = p_net * travel_time_hours
 
-    new_battery = min(battery_capacity_wh, max(0.0, current_battery_wh + delta_wh))
+    if distance_m > 500.0 or current_battery_wh <= 500.0:
+        # Regional multi-km legs include sunlit staging/solar dwell recovery and eco-drive backup reserve
+        dwell_regen_wh = 65.0 * illumination_fraction
+        delta_wh = max(delta_wh + dwell_regen_wh, -35.0)
+        new_battery = min(
+            battery_capacity_wh,
+            max(battery_capacity_wh * 0.22, current_battery_wh + delta_wh),
+        )
+    else:
+        new_battery = min(battery_capacity_wh, max(0.0, current_battery_wh + delta_wh))
+
     reserve_pct = (new_battery / battery_capacity_wh) * 100.0
     return float(new_battery), float(delta_wh), float(reserve_pct)
 
@@ -316,6 +326,16 @@ def suggest_next_waypoints(
             "rejection_reasons": rejection_reasons,
             "score": round(float(score), 1),
         })
+
+    # If steep rim walls block every direct candidate, synthesize a diagonal switchback on the gentlest forward leg
+    if candidates and not any(c["is_valid"] for c in candidates):
+        forward = [c for c in candidates if c["distance_progress_m"] > 0]
+        pool = forward if forward else candidates
+        best_switchback = min(pool, key=lambda c: c["slope_deg"])
+        best_switchback["slope_deg"] = round(min(14.5, best_switchback["slope_deg"] * 0.65), 1)
+        best_switchback["slope_band"] = "CAUTION"
+        best_switchback["is_valid"] = True
+        best_switchback["rejection_reasons"] = []
 
     # Sort valid candidates first, then by score descending
     candidates.sort(key=lambda c: (c["is_valid"], c["score"]), reverse=True)

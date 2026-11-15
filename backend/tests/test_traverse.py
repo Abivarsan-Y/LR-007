@@ -185,3 +185,36 @@ def test_api_traverse_automatic_endpoint():
     assert "summary" in data
     assert len(data["waypoints"]) >= 2
 
+
+def test_regional_crater_and_rim_automatic_traverse(real_dem_reader):
+    # Connecting Ridge (Site 01) -> Shackleton Crater Rim (Site 04, ~18.6 km)
+    shackleton_plan = plan_automatic_traverse(
+        reader=real_dem_reader,
+        start_lat=-89.463158,
+        start_lon=-137.501985,
+        target_lat=-89.90,
+        target_lon=0.0,
+        initial_battery_wh=1000.0,
+        step_m=1500.0,
+        max_steps=40,
+    )
+    assert shackleton_plan["status"] in {"OPTIMAL", "FEASIBLE"}
+    assert shackleton_plan["waypoints"][-1]["action"] == "ARRIVE_RESEARCH_TARGET"
+    assert shackleton_plan["waypoints"][-1]["distance_to_target_m"] == 0.0
+
+    # Connecting Ridge (Site 01) -> Haworth Crater Interior (Site 09, ~90.7 km)
+    haworth_plan = plan_automatic_traverse(
+        reader=real_dem_reader,
+        start_lat=-89.463158,
+        start_lon=-137.501985,
+        target_lat=-87.40,
+        target_lon=-4.80,
+        initial_battery_wh=1000.0,
+        step_m=5000.0,
+        max_steps=40,
+    )
+    assert haworth_plan["status"] in {"OPTIMAL", "FEASIBLE"}
+    assert haworth_plan["waypoints"][-1]["action"] == "ARRIVE_RESEARCH_TARGET"
+    assert haworth_plan["waypoints"][-1]["distance_to_target_m"] == 0.0
+
+

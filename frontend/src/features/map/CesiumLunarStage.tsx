@@ -8,6 +8,7 @@ import type {
   Coordinates,
   DecodedDemSiteTerrain,
   TraverseManualCandidate,
+  TraverseResearchTargetOption,
   TraverseWaypoint,
 } from '../../api/types'
 import { sampleDemAtLatLon } from '../../api/client'
@@ -32,9 +33,18 @@ interface Props {
   traverseWaypoints?: TraverseWaypoint[]
   traverseCandidates?: TraverseManualCandidate[]
   traverseTarget?: { latitude_deg: number; longitude_deg: number; elevation_m?: number; label?: string } | null
+  researchTargets?: TraverseResearchTargetOption[]
   pickingTraverseTarget?: boolean
   onSelectTraverseCandidate?: (candidate: TraverseManualCandidate) => void
-  onPickTraverseTarget?: (coords: { latitude_deg: number; longitude_deg: number; elevation_m: number }) => void
+  onPickTraverseTarget?: (coords: {
+    latitude_deg: number
+    longitude_deg: number
+    elevation_m: number
+    id?: string
+    label?: string
+    scienceTag?: string
+    category?: TraverseResearchTargetOption['category']
+  }) => void
   onCameraModeChange: (mode: 'ORBITAL' | 'SURFACE') => void
   onPickPoint: (pick: SurfacePickEvent) => void; onSelectCatalogSite: (site: CatalogSiteEntry) => void
   onNasaImageryStatusChange?: (status: 'loading' | 'loaded' | 'offline') => void
@@ -150,8 +160,39 @@ export function CesiumLunarStage(props: Props) {
           const cand=latest.current.traverseCandidates?.find(c=>c.candidate_id===candId)
           if(cand){latest.current.onSelectTraverseCandidate?.(cand);return}
         }
+        if(typeof id==='string'&&id.startsWith('research-target:')){
+          const tgtId=id.slice('research-target:'.length)
+          const foundTgt=latest.current.researchTargets?.find(t=>t.id===tgtId)
+          if(foundTgt){
+            latest.current.onPickTraverseTarget?.({
+              latitude_deg:foundTgt.latitude_deg,
+              longitude_deg:foundTgt.longitude_deg,
+              elevation_m:foundTgt.elevation_m,
+              id:foundTgt.id,
+              label:foundTgt.label,
+              scienceTag:foundTgt.scienceTag,
+              category:foundTgt.category,
+            })
+            return
+          }
+        }
         const site=typeof id==='string'&&id.startsWith('catalog:')?latest.current.catalogSites.find(s=>`catalog:${s.id}`===id):null
-        if(site&&!latest.current.pickingTraverseTarget){latest.current.onSelectCatalogSite(site);return}
+        if(site){
+          if(latest.current.pickingTraverseTarget){
+            latest.current.onPickTraverseTarget?.({
+              latitude_deg:site.latitude_deg,
+              longitude_deg:site.longitude_deg,
+              elevation_m:site.elevation_m,
+              id:site.id,
+              label:site.name,
+              scienceTag:site.tag,
+              category:'mapped_site_rim',
+            })
+            return
+          }
+          latest.current.onSelectCatalogSite(site)
+          return
+        }
         if(latest.current.pickingTraverseTarget){
           let picked: C.Cartesian3 | undefined
           if(viewer.scene.pickPositionSupported){
@@ -253,13 +294,36 @@ export function CesiumLunarStage(props: Props) {
     rt.traverse=[]
     const demOrigin=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
     const scale=rt.local?props.verticalScale:1
+    const pathOffset=rt.local?8:120
+    const wpOffset=rt.local?10:140
+    const tgtOffset=rt.local?18:150
+
+    if(!rt.local&&props.researchTargets?.length){
+      const catalogIds=new Set(props.catalogSites.map(s=>s.id))
+      for(const tgt of props.researchTargets){
+        if((tgt.category!=='water_ice_crater'&&tgt.category!=='mapped_site_rim')||catalogIds.has(tgt.id)||tgt.id.startsWith('local_')) continue
+        const isActive=props.traverseTarget&&Math.abs(props.traverseTarget.latitude_deg-tgt.latitude_deg)<1e-4&&Math.abs(props.traverseTarget.longitude_deg-tgt.longitude_deg)<1e-4
+        if(isActive) continue
+        rt.traverse.push(rt.viewer.entities.add({
+          id:`research-target:${tgt.id}`,
+          position:position(tgt.longitude_deg,tgt.latitude_deg,130),
+          point:{
+            pixelSize:8,
+            color:tgt.category==='water_ice_crater'?C.Color.fromCssColorString('#38bdf8'):C.Color.fromCssColorString('#fbbf24'),
+            outlineColor:C.Color.BLACK,
+            outlineWidth:1.5,
+            disableDepthTestDistance:Number.POSITIVE_INFINITY,
+          },
+        }))
+      }
+    }
 
     if(props.traverseTarget){
       const tgt=props.traverseTarget
       const tgtElev=tgt.elevation_m??sampleDemAtLatLon(props.demTerrain,tgt.latitude_deg,tgt.longitude_deg).elevationM
       rt.traverse.push(rt.viewer.entities.add({
         id:'traverse-target',
-        position:terrainPosition(tgt.latitude_deg,tgt.longitude_deg,tgtElev,demOrigin,scale,18),
+        position:terrainPosition(tgt.latitude_deg,tgt.longitude_deg,tgtElev,demOrigin,scale,tgtOffset),
         point:{pixelSize:12,color:C.Color.fromCssColorString('#f472b6'),outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY},
       }))
     }
@@ -267,7 +331,7 @@ export function CesiumLunarStage(props: Props) {
     const waypoints=props.traverseWaypoints??[]
     if(waypoints.length>=1){
       if(waypoints.length>=2){
-        const pathPositions=waypoints.map(wp=>terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,8))
+        const pathPositions=waypoints.map(wp=>terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,pathOffset))
         rt.traverse.push(rt.viewer.entities.add({
           id:'traverse-path',
           polyline:{positions:pathPositions,width:3.5,material:C.Color.fromCssColorString('#22d3ee')},
@@ -276,7 +340,7 @@ export function CesiumLunarStage(props: Props) {
       for(const wp of waypoints){
         rt.traverse.push(rt.viewer.entities.add({
           id:`traverse-wp:${wp.waypoint_index}`,
-          position:terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,10),
+          position:terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,wpOffset),
           point:{pixelSize:wp.waypoint_index===0?9:7,color:wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
         }))
       }
@@ -286,13 +350,13 @@ export function CesiumLunarStage(props: Props) {
     if(candidates.length>0){
       const originWp=waypoints.length>0?waypoints[waypoints.length-1]:null
       const originPos=originWp
-        ?terrainPosition(originWp.coordinates.latitude_deg,originWp.coordinates.longitude_deg,originWp.coordinates.elevation_m,demOrigin,scale,8)
+        ?terrainPosition(originWp.coordinates.latitude_deg,originWp.coordinates.longitude_deg,originWp.coordinates.elevation_m,demOrigin,scale,pathOffset)
         :props.focusCoordinates
-          ?terrainPosition(props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg,sampleDemAtLatLon(props.demTerrain,props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg).elevationM,demOrigin,scale,8)
+          ?terrainPosition(props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg,sampleDemAtLatLon(props.demTerrain,props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg).elevationM,demOrigin,scale,pathOffset)
           :null
       for(const cand of candidates){
         const colorCss=!cand.is_valid?'#ef4444':cand.slope_band==='SAFE'?'#10b981':'#f59e0b'
-        const candPos=terrainPosition(cand.coordinates.latitude_deg,cand.coordinates.longitude_deg,cand.coordinates.elevation_m,demOrigin,scale,12)
+        const candPos=terrainPosition(cand.coordinates.latitude_deg,cand.coordinates.longitude_deg,cand.coordinates.elevation_m,demOrigin,scale,tgtOffset-6)
         if(originPos&&cand.is_valid){
           rt.traverse.push(rt.viewer.entities.add({
             id:`traverse-cand-ray:${cand.candidate_id}`,
@@ -307,7 +371,7 @@ export function CesiumLunarStage(props: Props) {
       }
     }
     rt.viewer.scene.requestRender()
-  },[ready,props.traverseTarget,props.traverseWaypoints,props.traverseCandidates,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
+  },[ready,props.traverseTarget,props.researchTargets,props.catalogSites,props.traverseWaypoints,props.traverseCandidates,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
 
   return <div className="absolute inset-0" aria-label="Cesium lunar imagery and verified terrain">
     <div ref={host} className="absolute inset-0"/>

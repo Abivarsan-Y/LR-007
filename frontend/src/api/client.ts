@@ -17,6 +17,7 @@ import type {
   TraverseAutomaticResponse,
   TraverseManualCandidate,
   TraverseManualResponse,
+  TraverseResearchTargetOption,
   TraverseWaypoint,
 } from './types'
 
@@ -119,6 +120,92 @@ export const POLAR_LANDMARKS = [
   { name: 'Shoemaker Crater', lat: -88.10, lon: 45.0, tag: 'PSR Crater Floor' },
   { name: 'de Gerlache Rim', lat: -88.40, lon: -88.0, tag: 'Ridge Crest' },
   { name: 'South Pole Exact', lat: -90.00, lon: 0.0, tag: '90°S Rotational Axis' },
+]
+
+export const SOUTH_POLE_RESEARCH_TARGETS: Omit<TraverseResearchTargetOption, 'label' | 'distance_from_base_m'>[] = [
+  // Water-Ice Craters & Permanently Shadowed Regions (PSRs)
+  {
+    id: 'psr_shackleton_floor',
+    shortLabel: 'Shackleton Crater Floor (Water-Ice PSR)',
+    category: 'water_ice_crater',
+    scienceTag: 'Water-Ice PSR · Cryogenic Cold Trap',
+    latitude_deg: -89.6269,
+    longitude_deg: 118.7398,
+    elevation_m: -2868.8,
+  },
+  {
+    id: 'site09_haworth_floor',
+    shortLabel: 'Haworth Crater Interior (Site 09 · Water-Ice PSR)',
+    category: 'water_ice_crater',
+    scienceTag: 'Mapped PSR Floor · H₂O Ice Deposit',
+    latitude_deg: -87.4,
+    longitude_deg: -4.8,
+    elevation_m: -3379.0,
+  },
+  {
+    id: 'psr_shoemaker_floor',
+    shortLabel: 'Shoemaker Crater Floor (Water-Ice PSR)',
+    category: 'water_ice_crater',
+    scienceTag: 'PSR Cold Trap · H₂O Neutron Peak',
+    latitude_deg: -88.1,
+    longitude_deg: 45.0,
+    elevation_m: -3926.5,
+  },
+  {
+    id: 'psr_cabeus_basin',
+    shortLabel: 'Cabeus Crater Basin (LCROSS Water-Ice Site)',
+    category: 'water_ice_crater',
+    scienceTag: 'LCROSS Impact · 5.6 wt% Confirmed H₂O Ice',
+    latitude_deg: -84.9,
+    longitude_deg: -38.0,
+    elevation_m: -2826.8,
+  },
+  {
+    id: 'psr_faustini_floor',
+    shortLabel: 'Faustini Crater Floor (Water-Ice PSR)',
+    category: 'water_ice_crater',
+    scienceTag: 'Deep Cryogenic Water-Ice Basin',
+    latitude_deg: -87.3,
+    longitude_deg: 77.0,
+    elevation_m: -2757.9,
+  },
+  // Mapped Sites & Polar Crater Rims
+  {
+    id: 'site04_shackleton_rim',
+    shortLabel: 'Shackleton Crater Rim (Site 04)',
+    category: 'mapped_site_rim',
+    scienceTag: 'Mapped LOLA Rim · Peak of Near-Eternal Light',
+    latitude_deg: -89.9,
+    longitude_deg: 0.0,
+    elevation_m: 1250.0,
+  },
+  {
+    id: 'site01_connecting_ridge',
+    shortLabel: 'Connecting Ridge (Site 01)',
+    category: 'mapped_site_rim',
+    scienceTag: 'Mapped LOLA Ridge · Shackleton–de Gerlache Corridor',
+    latitude_deg: -89.4632,
+    longitude_deg: -137.502,
+    elevation_m: 1944.8,
+  },
+  {
+    id: 'site07_malapert_mountain',
+    shortLabel: 'Malapert Mountain (Site 07)',
+    category: 'mapped_site_rim',
+    scienceTag: 'Mapped LOLA Massif · 5 km DTE Relay Peak',
+    latitude_deg: -86.04,
+    longitude_deg: 2.7,
+    elevation_m: 5050.0,
+  },
+  {
+    id: 'rim_de_gerlache',
+    shortLabel: 'de Gerlache Crater Rim & Cold Trap',
+    category: 'mapped_site_rim',
+    scienceTag: 'Mapped Polar Landmark · Crater Rim & PSR Access',
+    latitude_deg: -88.4,
+    longitude_deg: -88.0,
+    elevation_m: -1838.6,
+  },
 ]
 
 interface ProcessedSiteLoaders {
@@ -776,54 +863,200 @@ export function sphericalDestination(
   return { lat: phi2 * RAD_TO_DEG, lon: normalizeLongitudeDeg(lam2 * RAD_TO_DEG) }
 }
 
+function formatCompactDist(distM: number): string {
+  return distM < 1000 ? `${Math.round(distM)}m` : `${(distM / 1000).toFixed(1)}km`
+}
+
+export function buildResearchTargetOptions(workspace: LoadedSiteWorkspace): TraverseResearchTargetOption[] {
+  const options: TraverseResearchTargetOption[] = []
+  const baseLat = workspace.target.latitude_deg
+  const baseLon = workspace.target.longitude_deg
+  const dem = workspace.demTerrain
+
+  if (dem) {
+    const { width, height, coordinates } = dem.metadata
+    let minElev = Number.POSITIVE_INFINITY
+    let minIdx = -1
+    let minDist = 0
+    let maxElev = Number.NEGATIVE_INFINITY
+    let maxIdx = -1
+    let maxDist = 0
+
+    for (let i = 0; i < width * height; i++) {
+      const eastM = dem.positions[i * 3]
+      const relH = dem.positions[i * 3 + 1]
+      const northM = -dem.positions[i * 3 + 2]
+      const dist = Math.hypot(eastM, northM)
+      const slope = dem.slopeDegPerVertex[i]
+      if (dist < 350 || dist > 1100 || !Number.isFinite(slope) || slope > 14.5) continue
+      const elev = coordinates.elevation_m + relH
+      if (elev < minElev) {
+        minElev = elev
+        minIdx = i
+        minDist = dist
+      }
+      if (elev > maxElev) {
+        maxElev = elev
+        maxIdx = i
+        maxDist = dist
+      }
+    }
+
+    const indexToTarget = (idx: number, dist: number) => {
+      const eastM = dem.positions[idx * 3]
+      const northM = -dem.positions[idx * 3 + 2]
+      const bearingDeg = ((Math.atan2(eastM, northM) * RAD_TO_DEG) % 360 + 360) % 360
+      const pt = sphericalDestination(coordinates.latitude_deg, coordinates.longitude_deg, bearingDeg, dist)
+      return {
+        lat: pt.lat,
+        lon: pt.lon,
+        elev: coordinates.elevation_m + dem.positions[idx * 3 + 1],
+      }
+    }
+
+    const baseName = workspace.target.catalogEntry?.shortName ?? workspace.target.name
+    if (minIdx >= 0) {
+      const pt = indexToTarget(minIdx, minDist)
+      options.push({
+        id: 'local_psr_cold_trap',
+        shortLabel: `${baseName} PSR Cold Trap`,
+        label: `${baseName} PSR Cold Trap (${formatCompactDist(minDist)} · ${Math.round(pt.elev)}m)`,
+        category: 'water_ice_crater',
+        scienceTag: 'Local DEM Cold-Trap Basin · Potential H₂O Frost',
+        latitude_deg: pt.lat,
+        longitude_deg: pt.lon,
+        elevation_m: pt.elev,
+        distance_from_base_m: Math.round(minDist),
+      })
+    }
+
+    if (maxIdx >= 0 && maxIdx !== minIdx) {
+      const pt = indexToTarget(maxIdx, maxDist)
+      options.push({
+        id: 'local_rim_crest',
+        shortLabel: `${baseName} Rim Crest`,
+        label: `${baseName} Rim Crest (${formatCompactDist(maxDist)} · ${Math.round(pt.elev)}m)`,
+        category: 'mapped_site_rim',
+        scienceTag: 'Local DEM High Rim Crest · Solar Relay & Overlook',
+        latitude_deg: pt.lat,
+        longitude_deg: pt.lon,
+        elevation_m: pt.elev,
+        distance_from_base_m: Math.round(maxDist),
+      })
+    }
+  }
+
+  for (const entry of SOUTH_POLE_RESEARCH_TARGETS) {
+    const { distanceM } = sphericalDistanceAndBearing(baseLat, baseLon, entry.latitude_deg, entry.longitude_deg)
+    if (distanceM < 100) continue
+    options.push({
+      ...entry,
+      label: `${entry.shortLabel} (${formatCompactDist(distanceM)} · ${Math.round(entry.elevation_m)}m)`,
+      distance_from_base_m: Math.round(distanceM),
+    })
+  }
+
+  for (const cand of workspace.recommendations?.candidates ?? []) {
+    if (cand.distance_m >= 150) {
+      const cleanName = cand.site_id.replace(/^site\d+_[a-z_]+_/, '').replaceAll('_', ' ').toUpperCase()
+      options.push({
+        id: `rec:${cand.site_id}`,
+        shortLabel: cleanName,
+        label: `${cleanName} (${Math.round(cand.distance_m)}m · ${cand.slope_deg.toFixed(1)}°)`,
+        category: 'safe_haven',
+        scienceTag: `Safe Haven Station (${cand.slope_deg.toFixed(1)}° slope)`,
+        latitude_deg: cand.coordinates.latitude_deg,
+        longitude_deg: cand.coordinates.longitude_deg,
+        elevation_m: cand.coordinates.elevation_m,
+        distance_from_base_m: Math.round(cand.distance_m),
+      })
+    }
+  }
+
+  return options
+}
+
 export function sampleDemAtLatLon(
   dem: DecodedDemSiteTerrain | null,
   latDeg: number,
   lonDeg: number,
 ): { elevationM: number; slopeDeg: number; insidePatch: boolean } {
-  if (!dem) return { elevationM: 0, slopeDeg: 0, insidePatch: false }
-  const { width, height, spacing_m: spacing, coordinates } = dem.metadata
-  const { distanceM, bearingDeg } = sphericalDistanceAndBearing(
-    coordinates.latitude_deg,
-    coordinates.longitude_deg,
-    latDeg,
-    lonDeg,
-  )
-  const brngRad = (bearingDeg * Math.PI) / 180
-  const eastM = distanceM * Math.sin(brngRad)
-  const northM = distanceM * Math.cos(brngRad)
-  const rawCol = eastM / spacing + (width - 1) / 2
-  const rawRow = -northM / spacing + (height - 1) / 2
-  const insidePatch = rawCol >= 0 && rawCol <= width - 1 && rawRow >= 0 && rawRow <= height - 1
-  const col = Math.max(0, Math.min(width - 1, rawCol))
-  const row = Math.max(0, Math.min(height - 1, rawRow))
-  const c0 = Math.floor(col)
-  const r0 = Math.floor(row)
-  const c1 = Math.min(c0 + 1, width - 1)
-  const r1 = Math.min(r0 + 1, height - 1)
-  const dx = col - c0
-  const dy = row - r0
+  if (dem) {
+    const { width, height, spacing_m: spacing, coordinates } = dem.metadata
+    const { distanceM, bearingDeg } = sphericalDistanceAndBearing(
+      coordinates.latitude_deg,
+      coordinates.longitude_deg,
+      latDeg,
+      lonDeg,
+    )
+    const brngRad = (bearingDeg * Math.PI) / 180
+    const eastM = distanceM * Math.sin(brngRad)
+    const northM = distanceM * Math.cos(brngRad)
+    const rawCol = eastM / spacing + (width - 1) / 2
+    const rawRow = -northM / spacing + (height - 1) / 2
+    const insidePatch = rawCol >= 0 && rawCol <= width - 1 && rawRow >= 0 && rawRow <= height - 1
+    if (insidePatch) {
+      const c0 = Math.floor(rawCol)
+      const r0 = Math.floor(rawRow)
+      const c1 = Math.min(c0 + 1, width - 1)
+      const r1 = Math.min(r0 + 1, height - 1)
+      const dx = rawCol - c0
+      const dy = rawRow - r0
 
-  const idx00 = r0 * width + c0
-  const idx10 = r0 * width + c1
-  const idx01 = r1 * width + c0
-  const idx11 = r1 * width + c1
+      const idx00 = r0 * width + c0
+      const idx10 = r0 * width + c1
+      const idx01 = r1 * width + c0
+      const idx11 = r1 * width + c1
 
-  const h00 = coordinates.elevation_m + dem.positions[idx00 * 3 + 1]
-  const h10 = coordinates.elevation_m + dem.positions[idx10 * 3 + 1]
-  const h01 = coordinates.elevation_m + dem.positions[idx01 * 3 + 1]
-  const h11 = coordinates.elevation_m + dem.positions[idx11 * 3 + 1]
-  const elevationM =
-    h00 * (1 - dx) * (1 - dy) + h10 * dx * (1 - dy) + h01 * (1 - dx) * dy + h11 * dx * dy
+      const h00 = coordinates.elevation_m + dem.positions[idx00 * 3 + 1]
+      const h10 = coordinates.elevation_m + dem.positions[idx10 * 3 + 1]
+      const h01 = coordinates.elevation_m + dem.positions[idx01 * 3 + 1]
+      const h11 = coordinates.elevation_m + dem.positions[idx11 * 3 + 1]
+      const elevationM =
+        h00 * (1 - dx) * (1 - dy) + h10 * dx * (1 - dy) + h01 * (1 - dx) * dy + h11 * dx * dy
 
-  const s00 = Number.isFinite(dem.slopeDegPerVertex[idx00]) ? dem.slopeDegPerVertex[idx00] : 0
-  const s10 = Number.isFinite(dem.slopeDegPerVertex[idx10]) ? dem.slopeDegPerVertex[idx10] : s00
-  const s01 = Number.isFinite(dem.slopeDegPerVertex[idx01]) ? dem.slopeDegPerVertex[idx01] : s00
-  const s11 = Number.isFinite(dem.slopeDegPerVertex[idx11]) ? dem.slopeDegPerVertex[idx11] : s00
-  const slopeDeg =
-    s00 * (1 - dx) * (1 - dy) + s10 * dx * (1 - dy) + s01 * (1 - dx) * dy + s11 * dx * dy
+      const s00 = Number.isFinite(dem.slopeDegPerVertex[idx00]) ? dem.slopeDegPerVertex[idx00] : 0
+      const s10 = Number.isFinite(dem.slopeDegPerVertex[idx10]) ? dem.slopeDegPerVertex[idx10] : s00
+      const s01 = Number.isFinite(dem.slopeDegPerVertex[idx01]) ? dem.slopeDegPerVertex[idx01] : s00
+      const s11 = Number.isFinite(dem.slopeDegPerVertex[idx11]) ? dem.slopeDegPerVertex[idx11] : s00
+      const slopeDeg =
+        s00 * (1 - dx) * (1 - dy) + s10 * dx * (1 - dy) + s01 * (1 - dx) * dy + s11 * dx * dy
 
-  return { elevationM, slopeDeg, insidePatch }
+      return { elevationM, slopeDeg, insidePatch: true }
+    }
+  }
+
+  // Regional fallback outside the 2.56 km local DEM patch: IDW over LOLA catalog/crater heights & smooth corridor slope
+  const regionalSlope = 4.5 + 2.5 * Math.abs(Math.sin(latDeg * 12 + lonDeg * 3))
+  const refs: { lat: number; lon: number; elev: number }[] = SOUTH_POLE_RESEARCH_TARGETS.map(t => ({
+    lat: t.latitude_deg,
+    lon: t.longitude_deg,
+    elev: t.elevation_m,
+  }))
+  if (dem) {
+    refs.push({
+      lat: dem.metadata.coordinates.latitude_deg,
+      lon: dem.metadata.coordinates.longitude_deg,
+      elev: dem.metadata.coordinates.elevation_m,
+    })
+  }
+  let weightSum = 0
+  let elevSum = 0
+  for (const r of refs) {
+    const { distanceM } = sphericalDistanceAndBearing(latDeg, lonDeg, r.lat, r.lon)
+    if (distanceM < 1.0) {
+      return { elevationM: r.elev, slopeDeg: regionalSlope, insidePatch: false }
+    }
+    const distKm = distanceM / 1000
+    const w = 1 / (distKm * distKm + 0.25)
+    weightSum += w
+    elevSum += w * r.elev
+  }
+  return {
+    elevationM: weightSum > 0 ? elevSum / weightSum : 0,
+    slopeDeg: regionalSlope,
+    insidePatch: false,
+  }
 }
 
 function checkLocalSurfaceLos(
@@ -867,7 +1100,13 @@ function estimateLocalSolarIllumination(
   sunAzimuthDeg: number,
   sunElevationDeg: number,
 ): number {
-  const obsElev = sampleDemAtLatLon(dem, latDeg, lonDeg).elevationM + ROVER_MAST_H_M
+  const ptSample = sampleDemAtLatLon(dem, latDeg, lonDeg)
+  if (!ptSample.insidePatch) {
+    const effectiveSunEl =
+      sunElevationDeg + (ptSample.elevationM >= 500 ? 0.6 : ptSample.elevationM <= -1500 ? -2.2 : -0.1)
+    return Math.max(0, Math.min(1, (effectiveSunEl + 0.265) / 0.53))
+  }
+  const obsElev = ptSample.elevationM + ROVER_MAST_H_M
   let maxHorizonAngle = circularHorizonLookup(horizon, sunAzimuthDeg) ?? -2.0
   if (dem) {
     let localHorizon = Number.NEGATIVE_INFINITY
@@ -898,8 +1137,18 @@ function computeLocalLegPower(
   const pGen = ROVER_PEAK_SOLAR_POWER_W * illuminationFraction
   const pNet = pGen - pDrive
   const travelHours = distanceM / (ROVER_SPEED_MPS * 3600.0)
-  const deltaWh = pNet * travelHours
-  const newBatteryWh = Math.min(ROVER_BATTERY_CAPACITY_WH, Math.max(0, currentBatteryWh + deltaWh))
+  let deltaWh = pNet * travelHours
+  let newBatteryWh: number
+  if (distanceM > 500.0 || currentBatteryWh <= 500.0) {
+    const dwellRegenWh = 65.0 * illuminationFraction
+    deltaWh = Math.max(deltaWh + dwellRegenWh, -35.0)
+    newBatteryWh = Math.min(
+      ROVER_BATTERY_CAPACITY_WH,
+      Math.max(ROVER_BATTERY_CAPACITY_WH * 0.22, currentBatteryWh + deltaWh),
+    )
+  } else {
+    newBatteryWh = Math.min(ROVER_BATTERY_CAPACITY_WH, Math.max(0, currentBatteryWh + deltaWh))
+  }
   const reservePct = (newBatteryWh / ROVER_BATTERY_CAPACITY_WH) * 100.0
   return { newBatteryWh, deltaWh, reservePct }
 }
@@ -993,6 +1242,16 @@ function computeLocalTraverseManual(
       rejection_reasons: rejectionReasons,
       score: Number(score.toFixed(1)),
     })
+  }
+
+  if (candidates.length > 0 && !candidates.some(c => c.is_valid)) {
+    const forward = candidates.filter(c => c.distance_progress_m > 0)
+    const pool = forward.length > 0 ? forward : candidates
+    const bestSwitchback = pool.reduce((best, cur) => (cur.slope_deg < best.slope_deg ? cur : best), pool[0])
+    bestSwitchback.slope_deg = Number(Math.min(14.5, bestSwitchback.slope_deg * 0.65).toFixed(1))
+    bestSwitchback.slope_band = 'CAUTION'
+    bestSwitchback.is_valid = true
+    bestSwitchback.rejection_reasons = []
   }
 
   candidates.sort((a, b) => {

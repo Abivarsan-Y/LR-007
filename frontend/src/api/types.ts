@@ -309,3 +309,18 @@ export interface TraverseAutomaticResponse {
   }
   waypoints: TraverseWaypoint[]
 }
+
+export type TraverseTargetCategory = 'water_ice_crater' | 'mapped_site_rim' | 'safe_haven' | 'custom'
+
+export interface TraverseResearchTargetOption {
+  id: string
+  label: string
+  shortLabel: string
+  category: TraverseTargetCategory
+  scienceTag: string
+  latitude_deg: number
+  longitude_deg: number
+  elevation_m: number
+  distance_from_base_m: number
+}
+
