@@ -32,7 +32,7 @@ interface Props {
   overlayMode: TerrainOverlayMode; showWireframe: boolean; verticalScale: number; observerHeightM: 2 | 5
   traverseWaypoints?: TraverseWaypoint[]
   traverseCandidates?: TraverseManualCandidate[]
-  traverseTarget?: { latitude_deg: number; longitude_deg: number; elevation_m?: number; label?: string } | null
+  traverseTarget?: { latitude_deg: number; longitude_deg: number; elevation_m?: number; label?: string; shortLabel?: string } | null
   researchTargets?: TraverseResearchTargetOption[]
   pickingTraverseTarget?: boolean
   onSelectTraverseCandidate?: (candidate: TraverseManualCandidate) => void
@@ -56,6 +56,44 @@ interface Runtime {
   patchCentre: C.Cartesian3 | null
 }
 const MOON = new C.Ellipsoid(RADIUS, RADIUS, RADIUS)
+function svgDataUri(svg: string) {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+// Hexagonal Lunar Lander / Base Pod Beacon (#2dd4bf teal + #34d399 emerald apex)
+const BASE_POD_ICON_URI = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+    '<polygon points="16,2 28,9 28,23 16,30 4,23 4,9" fill="#061318" fill-opacity="0.92" stroke="#2dd4bf" stroke-width="2"/>' +
+    '<rect x="11" y="11" width="10" height="7" rx="1.5" fill="none" stroke="#6ee7b7" stroke-width="1.5"/>' +
+    '<line x1="12" y1="18" x2="9" y2="23" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"/>' +
+    '<line x1="20" y1="18" x2="23" y2="23" stroke="#2dd4bf" stroke-width="1.6" stroke-linecap="round"/>' +
+    '<line x1="16" y1="6" x2="16" y2="11" stroke="#34d399" stroke-width="1.5"/>' +
+    '<circle cx="16" cy="6" r="2.2" fill="#34d399"/>' +
+  '</svg>',
+)
+// Diamond Lock-On Research Target Reticle (#f472b6 magenta + #38bdf8 corner brackets)
+const TARGET_RETICLE_ICON_URI = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="34" viewBox="0 0 34 34">' +
+    '<path d="M5,10 V5 H10 M24,5 H29 V10 M5,24 V29 H10 M24,29 H29 V24" fill="none" stroke="#38bdf8" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<polygon points="17,4 30,17 17,30 4,17" fill="#1a0918" fill-opacity="0.88" stroke="#f472b6" stroke-width="2"/>' +
+    '<line x1="17" y1="9" x2="17" y2="25" stroke="#f9a8d4" stroke-width="1.3"/>' +
+    '<line x1="9" y1="17" x2="25" y2="17" stroke="#f9a8d4" stroke-width="1.3"/>' +
+    '<circle cx="17" cy="17" r="2.6" fill="#f472b6"/>' +
+  '</svg>',
+)
+// Unselected Water-Ice PSR Crater hollow diamond marker
+const ICE_CRATER_MARKER_URI = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
+    '<polygon points="11,3 19,11 11,19 3,11" fill="#061318" fill-opacity="0.72" stroke="#38bdf8" stroke-width="1.8"/>' +
+    '<circle cx="11" cy="11" r="2" fill="#38bdf8"/>' +
+  '</svg>',
+)
+// Unselected Mapped Polar Rim hollow diamond marker
+const MAPPED_RIM_MARKER_URI = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
+    '<polygon points="11,3 19,11 11,19 3,11" fill="#141006" fill-opacity="0.72" stroke="#fbbf24" stroke-width="1.8"/>' +
+    '<circle cx="11" cy="11" r="2" fill="#fbbf24"/>' +
+  '</svg>',
+)
 function position(lon: number, lat: number, height=0) { return C.Cartesian3.fromDegrees(lon,lat,height,MOON) }
 function terrainPosition(
   lat: number,
@@ -270,7 +308,20 @@ export function CesiumLunarStage(props: Props) {
     if(props.focusCoordinates){
       const fixed=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
       const lat=fixed?.latitude_deg??props.focusCoordinates.latitude_deg,lon=fixed?.longitude_deg??props.focusCoordinates.longitude_deg
-      rt.target=rt.viewer.entities.add({position:position(lon,lat,fixed?fixed.elevation_m+props.observerHeightM:0),point:{pixelSize:10,color:C.Color.AQUAMARINE,outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY}})
+      rt.target=rt.viewer.entities.add({
+        position:position(lon,lat,fixed?fixed.elevation_m+props.observerHeightM:140),
+        billboard:{image:BASE_POD_ICON_URI,width:28,height:28,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        label:{
+          text:'BASE POD',
+          font:'600 9px "JetBrains Mono", monospace',
+          fillColor:C.Color.fromCssColorString('#6ee7b7'),
+          outlineColor:C.Color.BLACK,
+          outlineWidth:3,
+          style:C.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset:new C.Cartesian2(0,-20),
+          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+        },
+      })
     }
     for(const ray of rt.rays)ray.show=false
     if(rt.local&&matching&&props.currentSample){
@@ -307,11 +358,10 @@ export function CesiumLunarStage(props: Props) {
         rt.traverse.push(rt.viewer.entities.add({
           id:`research-target:${tgt.id}`,
           position:position(tgt.longitude_deg,tgt.latitude_deg,130),
-          point:{
-            pixelSize:8,
-            color:tgt.category==='water_ice_crater'?C.Color.fromCssColorString('#38bdf8'):C.Color.fromCssColorString('#fbbf24'),
-            outlineColor:C.Color.BLACK,
-            outlineWidth:1.5,
+          billboard:{
+            image:tgt.category==='water_ice_crater'?ICE_CRATER_MARKER_URI:MAPPED_RIM_MARKER_URI,
+            width:20,
+            height:20,
             disableDepthTestDistance:Number.POSITIVE_INFINITY,
           },
         }))
@@ -324,7 +374,17 @@ export function CesiumLunarStage(props: Props) {
       rt.traverse.push(rt.viewer.entities.add({
         id:'traverse-target',
         position:terrainPosition(tgt.latitude_deg,tgt.longitude_deg,tgtElev,demOrigin,scale,tgtOffset),
-        point:{pixelSize:12,color:C.Color.fromCssColorString('#f472b6'),outlineColor:C.Color.BLACK,outlineWidth:2,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        billboard:{image:TARGET_RETICLE_ICON_URI,width:30,height:30,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        label:{
+          text:tgt.shortLabel??tgt.label??'RESEARCH TARGET',
+          font:'600 9px "JetBrains Mono", monospace',
+          fillColor:C.Color.fromCssColorString('#f9a8d4'),
+          outlineColor:C.Color.BLACK,
+          outlineWidth:3,
+          style:C.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset:new C.Cartesian2(0,-22),
+          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+        },
       }))
     }
 
@@ -338,10 +398,11 @@ export function CesiumLunarStage(props: Props) {
         }))
       }
       for(const wp of waypoints){
+        if(wp.waypoint_index===0||wp.action==='ARRIVE_RESEARCH_TARGET') continue
         rt.traverse.push(rt.viewer.entities.add({
           id:`traverse-wp:${wp.waypoint_index}`,
           position:terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,wpOffset),
-          point:{pixelSize:wp.waypoint_index===0?9:7,color:wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+          point:{pixelSize:7,color:wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
         }))
       }
     }

@@ -1153,6 +1153,94 @@ function computeLocalLegPower(
   return { newBatteryWh, deltaWh, reservePct }
 }
 
+function evaluateLocalStepCandidate(
+  params: {
+    candLat: number
+    candLon: number
+    bearing: number
+    candStepDist: number
+    nominalStepDist: number
+    currentDistToTarget: number
+    targetLat: number
+    targetLon: number
+    baseLat: number
+    baseLon: number
+    currentBat: number
+    sunAz: number
+    sunEl: number
+    candidateId: string
+  },
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+): TraverseManualCandidate {
+  const {
+    candLat,
+    candLon,
+    bearing,
+    candStepDist,
+    nominalStepDist,
+    currentDistToTarget,
+    targetLat,
+    targetLon,
+    baseLat,
+    baseLon,
+    currentBat,
+    sunAz,
+    sunEl,
+    candidateId,
+  } = params
+  const candSample = sampleDemAtLatLon(dem, candLat, candLon)
+  const { distanceM: distToTarget } = sphericalDistanceAndBearing(candLat, candLon, targetLat, targetLon)
+  const progressM = currentDistToTarget - distToTarget
+  const illum = estimateLocalSolarIllumination(dem, horizon, candLat, candLon, sunAz, sunEl)
+  const pwr = computeLocalLegPower(candStepDist, candSample.slopeDeg, illum, currentBat)
+  const los = checkLocalSurfaceLos(dem, baseLat, baseLon, candLat, candLon)
+
+  let isValid = true
+  const rejectionReasons: string[] = []
+  if (candSample.slopeDeg > ROVER_MAX_SLOPE_DEG) {
+    isValid = false
+    rejectionReasons.push(`Excessive slope (${candSample.slopeDeg.toFixed(1)}° > 15° limit)`)
+  }
+  if (pwr.reservePct < ROVER_MIN_RESERVE_PCT) {
+    isValid = false
+    rejectionReasons.push(`Low battery reserve (${pwr.reservePct.toFixed(1)}% < 20%)`)
+  }
+
+  const progressRatio = progressM / Math.max(candStepDist, 1.0)
+  const reachBonus = (progressM / Math.max(nominalStepDist, 1.0)) * 90.0
+  const score =
+    progressRatio * 180.0 +
+    reachBonus +
+    illum * 150.0 +
+    (los.hasLos ? 100.0 : 0.0) -
+    candSample.slopeDeg * 22.0
+
+  return {
+    candidate_id: candidateId,
+    coordinates: {
+      latitude_deg: Number(candLat.toFixed(6)),
+      longitude_deg: Number(candLon.toFixed(6)),
+      elevation_m: Number(candSample.elevationM.toFixed(1)),
+    },
+    step_bearing_deg: Number((((bearing % 360) + 360) % 360).toFixed(1)),
+    step_distance_m: Number(candStepDist.toFixed(1)),
+    distance_to_target_m: Number(distToTarget.toFixed(1)),
+    distance_progress_m: Number(progressM.toFixed(1)),
+    slope_deg: Number(candSample.slopeDeg.toFixed(1)),
+    slope_band: classifySlopeBand(candSample.slopeDeg),
+    illumination_fraction: Number(illum.toFixed(3)),
+    battery_wh: Number(pwr.newBatteryWh.toFixed(1)),
+    battery_reserve_pct: Number(pwr.reservePct.toFixed(1)),
+    battery_delta_wh: Number(pwr.deltaWh.toFixed(1)),
+    los_to_base: los.hasLos,
+    los_clearance_m: Number(los.minClearanceM.toFixed(1)),
+    is_valid: isValid,
+    rejection_reasons: rejectionReasons,
+    score: Number(score.toFixed(1)),
+  }
+}
+
 function computeLocalTraverseManual(
   params: {
     current_latitude_deg: number
@@ -1194,54 +1282,93 @@ function computeLocalTraverseManual(
   const candidates: TraverseManualCandidate[] = []
   const arcSpan = 130.0
   const halfArc = arcSpan / 2
+  const radialMultipliers = [0.45, 0.72, 1.0, 1.32]
 
   for (let i = 0; i < numCands; i++) {
     const bearing = azToTarget - halfArc + (i / Math.max(1, numCands - 1)) * arcSpan
-    const dest = sphericalDestination(currentLat, currentLon, bearing, stepDist)
-    const candSample = sampleDemAtLatLon(dem, dest.lat, dest.lon)
-    const { distanceM: distToTarget } = sphericalDistanceAndBearing(dest.lat, dest.lon, targetLat, targetLon)
-    const progressM = currentDistToTarget - distToTarget
-    const illum = estimateLocalSolarIllumination(dem, horizon, dest.lat, dest.lon, sunAz, sunEl)
-    const pwr = computeLocalLegPower(stepDist, candSample.slopeDeg, illum, currentBat)
-    const los = checkLocalSurfaceLos(dem, baseLat, baseLon, dest.lat, dest.lon)
+    let bestForBearing: TraverseManualCandidate | null = null
+    const seenDists: number[] = []
 
-    let isValid = true
-    const rejectionReasons: string[] = []
-    if (candSample.slopeDeg > ROVER_MAX_SLOPE_DEG) {
-      isValid = false
-      rejectionReasons.push(`Excessive slope (${candSample.slopeDeg.toFixed(1)}° > 15° limit)`)
+    for (const rMult of radialMultipliers) {
+      let candStepDist = stepDist * rMult
+      if (currentDistToTarget > 10.0) {
+        candStepDist = Math.min(candStepDist, currentDistToTarget)
+      }
+      if (seenDists.some(d => Math.abs(candStepDist - d) < 5.0)) continue
+      seenDists.push(candStepDist)
+
+      const dest = sphericalDestination(currentLat, currentLon, bearing, candStepDist)
+      const evaluated = evaluateLocalStepCandidate(
+        {
+          candLat: dest.lat,
+          candLon: dest.lon,
+          bearing,
+          candStepDist,
+          nominalStepDist: stepDist,
+          currentDistToTarget,
+          targetLat,
+          targetLon,
+          baseLat,
+          baseLon,
+          currentBat,
+          sunAz,
+          sunEl,
+          candidateId: `cand_${i + 1}`,
+        },
+        dem,
+        horizon,
+      )
+      if (
+        !bestForBearing ||
+        Number(evaluated.is_valid) > Number(bestForBearing.is_valid) ||
+        (evaluated.is_valid === bestForBearing.is_valid && evaluated.score > bestForBearing.score)
+      ) {
+        bestForBearing = evaluated
+      }
     }
-    if (pwr.reservePct < ROVER_MIN_RESERVE_PCT) {
-      isValid = false
-      rejectionReasons.push(`Low battery reserve (${pwr.reservePct.toFixed(1)}% < 20%)`)
-    }
 
-    const score =
-      progressM + illum * 150.0 + (los.hasLos ? 100.0 : 0.0) - candSample.slopeDeg * 20.0
+    if (bestForBearing) candidates.push(bestForBearing)
+  }
 
-    candidates.push({
-      candidate_id: `cand_${i + 1}`,
-      coordinates: {
-        latitude_deg: Number(dest.lat.toFixed(6)),
-        longitude_deg: Number(dest.lon.toFixed(6)),
-        elevation_m: Number(candSample.elevationM.toFixed(1)),
+  if (currentDistToTarget > 0 && currentDistToTarget <= stepDist * 1.45) {
+    const targetSnap = evaluateLocalStepCandidate(
+      {
+        candLat: targetLat,
+        candLon: targetLon,
+        bearing: azToTarget,
+        candStepDist: currentDistToTarget,
+        nominalStepDist: stepDist,
+        currentDistToTarget,
+        targetLat,
+        targetLon,
+        baseLat,
+        baseLon,
+        currentBat,
+        sunAz,
+        sunEl,
+        candidateId: 'cand_target',
       },
-      step_bearing_deg: Number((((bearing % 360) + 360) % 360).toFixed(1)),
-      step_distance_m: Number(stepDist.toFixed(1)),
-      distance_to_target_m: Number(distToTarget.toFixed(1)),
-      distance_progress_m: Number(progressM.toFixed(1)),
-      slope_deg: Number(candSample.slopeDeg.toFixed(1)),
-      slope_band: classifySlopeBand(candSample.slopeDeg),
-      illumination_fraction: Number(illum.toFixed(3)),
-      battery_wh: Number(pwr.newBatteryWh.toFixed(1)),
-      battery_reserve_pct: Number(pwr.reservePct.toFixed(1)),
-      battery_delta_wh: Number(pwr.deltaWh.toFixed(1)),
-      los_to_base: los.hasLos,
-      los_clearance_m: Number(los.minClearanceM.toFixed(1)),
-      is_valid: isValid,
-      rejection_reasons: rejectionReasons,
-      score: Number(score.toFixed(1)),
-    })
+      dem,
+      horizon,
+    )
+    targetSnap.distance_to_target_m = 0
+    targetSnap.distance_progress_m = Number(currentDistToTarget.toFixed(1))
+    if (targetSnap.is_valid) {
+      targetSnap.score = Number((targetSnap.score + 250.0).toFixed(1))
+    }
+    if (candidates.length >= numCands) {
+      let worstIdx = 0
+      for (let i = 1; i < candidates.length; i++) {
+        const cur = candidates[i]
+        const worst = candidates[worstIdx]
+        if (Number(cur.is_valid) < Number(worst.is_valid) || (cur.is_valid === worst.is_valid && cur.score < worst.score)) {
+          worstIdx = i
+        }
+      }
+      candidates[worstIdx] = targetSnap
+    } else {
+      candidates.push(targetSnap)
+    }
   }
 
   if (candidates.length > 0 && !candidates.some(c => c.is_valid)) {
@@ -1424,6 +1551,7 @@ export async function requestTraverseAutomatic(
     }
 
     const best = validCands[0]
+    const arrived = best.distance_to_target_m <= 5.0
     currLat = best.coordinates.latitude_deg
     currLon = best.coordinates.longitude_deg
     currBat = best.battery_wh
@@ -1433,14 +1561,16 @@ export async function requestTraverseAutomatic(
       waypoint_index: step,
       coordinates: best.coordinates,
       distance_from_start_m: Number(totalDist.toFixed(1)),
-      distance_to_target_m: best.distance_to_target_m,
+      distance_to_target_m: arrived ? 0 : best.distance_to_target_m,
       slope_deg: best.slope_deg,
       illumination_fraction: best.illumination_fraction,
       battery_wh: best.battery_wh,
       battery_reserve_pct: best.battery_reserve_pct,
       los_to_base: best.los_to_base,
-      action: `STEP_${step}`,
+      action: arrived ? 'ARRIVE_RESEARCH_TARGET' : `STEP_${step}`,
     })
+
+    if (arrived) break
 
     if (step === maxSteps) {
       status = 'FEASIBLE'

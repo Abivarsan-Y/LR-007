@@ -220,6 +220,91 @@ def compute_leg_power(
     return float(new_battery), float(delta_wh), float(reserve_pct)
 
 
+def _evaluate_step_candidate(
+    reader: LolaDemReader,
+    geod: Geod,
+    cand_lat: float,
+    cand_lon: float,
+    bearing: float,
+    cand_step_dist: float,
+    nominal_step_dist: float,
+    current_dist_to_target: float,
+    target_lat: float,
+    target_lon: float,
+    base_lat: float,
+    base_lon: float,
+    current_battery_wh: float,
+    sun_azimuth_deg: float,
+    sun_elevation_deg: float,
+    r_moon: float,
+    candidate_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Evaluate terrain, illumination, battery reserve, LOS, and efficiency score for one step candidate."""
+    cand_elev = reader.get_elevation_at_latlon(cand_lat, cand_lon)
+    if np.isnan(cand_elev):
+        return None
+
+    cand_slope = compute_point_slope_deg(reader, cand_lat, cand_lon, r_moon=r_moon)
+    slope_info = classify_slope(cand_slope)
+
+    _, _, cand_dist_to_target = geod.inv(cand_lon, cand_lat, target_lon, target_lat)
+    dist_progress_m = current_dist_to_target - cand_dist_to_target
+
+    cand_illum = estimate_solar_illumination(
+        reader, cand_lat, cand_lon, sun_azimuth_deg, sun_elevation_deg, r_moon=r_moon
+    )
+    new_bat, delta_wh, reserve_pct = compute_leg_power(
+        cand_step_dist, cand_slope, cand_illum, current_battery_wh
+    )
+    cand_los, cand_clearance = check_surface_los(
+        reader, base_lat, base_lon, cand_lat, cand_lon, r_moon=r_moon
+    )
+
+    is_valid = True
+    rejection_reasons = []
+    if cand_slope > MAX_TRAVERSABLE_SLOPE_DEG:
+        is_valid = False
+        rejection_reasons.append(f"Excessive slope ({cand_slope:.1f}° > 15° limit)")
+    if reserve_pct < MIN_BATTERY_RESERVE_PCT:
+        is_valid = False
+        rejection_reasons.append(f"Low battery reserve ({reserve_pct:.1f}% < 20%)")
+
+    # Efficiency-normalized score so variable-length steps compete fairly on terrain & sun quality
+    progress_ratio = dist_progress_m / max(cand_step_dist, 1.0)
+    reach_bonus = (dist_progress_m / max(nominal_step_dist, 1.0)) * 90.0
+    score = (
+        (progress_ratio * 180.0)
+        + reach_bonus
+        + (cand_illum * 150.0)
+        + (100.0 if cand_los else 0.0)
+        - (cand_slope * 22.0)
+    )
+
+    return {
+        "candidate_id": candidate_id,
+        "coordinates": {
+            "latitude_deg": round(cand_lat, 6),
+            "longitude_deg": round(cand_lon, 6),
+            "elevation_m": round(float(cand_elev), 1),
+        },
+        "step_bearing_deg": round(float(bearing % 360.0), 1),
+        "step_distance_m": round(float(cand_step_dist), 1),
+        "distance_to_target_m": round(float(cand_dist_to_target), 1),
+        "distance_progress_m": round(float(dist_progress_m), 1),
+        "slope_deg": round(float(cand_slope), 1),
+        "slope_band": slope_info["status"],
+        "illumination_fraction": round(float(cand_illum), 3),
+        "battery_wh": round(float(new_bat), 1),
+        "battery_reserve_pct": round(float(reserve_pct), 1),
+        "battery_delta_wh": round(float(delta_wh), 1),
+        "los_to_base": bool(cand_los),
+        "los_clearance_m": round(float(cand_clearance), 1),
+        "is_valid": is_valid,
+        "rejection_reasons": rejection_reasons,
+        "score": round(float(score), 1),
+    }
+
+
 def suggest_next_waypoints(
     reader: LolaDemReader,
     current_lat: float,
@@ -238,9 +323,8 @@ def suggest_next_waypoints(
 ) -> Dict[str, Any]:
     """
     MANUAL MODE:
-    Evaluates available candidate forward steps towards the target research area.
-    Computes slope, solar power regeneration, battery reserve, LOS to Base Pod,
-    and remaining distance to destination.
+    Evaluates variable-length candidate forward steps towards the target research area.
+    Samples multiple radii per bearing and clamps directly to the target within reach.
     """
     geod = Geod(a=r_moon, b=r_moon)
     az_to_target, _, current_dist_to_target = geod.inv(
@@ -249,7 +333,7 @@ def suggest_next_waypoints(
 
     current_elev = reader.get_elevation_at_latlon(current_lat, current_lon)
     current_slope = compute_point_slope_deg(reader, current_lat, current_lon, r_moon=r_moon)
-    current_los, current_clearance = check_surface_los(
+    current_los, _ = check_surface_los(
         reader, base_lat, base_lon, current_lat, current_lon, r_moon=r_moon
     )
 
@@ -257,75 +341,84 @@ def suggest_next_waypoints(
     bearings = np.linspace(az_to_target - half_arc, az_to_target + half_arc, num_candidates)
 
     candidates: List[Dict[str, Any]] = []
+    radial_multipliers = (0.45, 0.72, 1.0, 1.32)
 
     for idx, bearing in enumerate(bearings):
-        cand_lon, cand_lat, _ = geod.fwd(current_lon, current_lat, bearing, step_distance_m)
-        cand_lon = float(cand_lon)
-        cand_lat = float(cand_lat)
+        best_for_bearing: Optional[Dict[str, Any]] = None
+        seen_dists: List[float] = []
+        for r_mult in radial_multipliers:
+            cand_step_dist = step_distance_m * r_mult
+            if current_dist_to_target > 10.0:
+                cand_step_dist = min(cand_step_dist, current_dist_to_target)
+            if any(abs(cand_step_dist - prev_d) < 5.0 for prev_d in seen_dists):
+                continue
+            seen_dists.append(cand_step_dist)
 
-        cand_elev = reader.get_elevation_at_latlon(cand_lat, cand_lon)
-        if np.isnan(cand_elev):
-            continue
+            cand_lon, cand_lat, _ = geod.fwd(current_lon, current_lat, bearing, cand_step_dist)
+            evaluated = _evaluate_step_candidate(
+                reader=reader,
+                geod=geod,
+                cand_lat=float(cand_lat),
+                cand_lon=float(cand_lon),
+                bearing=float(bearing),
+                cand_step_dist=cand_step_dist,
+                nominal_step_dist=step_distance_m,
+                current_dist_to_target=current_dist_to_target,
+                target_lat=target_lat,
+                target_lon=target_lon,
+                base_lat=base_lat,
+                base_lon=base_lon,
+                current_battery_wh=current_battery_wh,
+                sun_azimuth_deg=sun_azimuth_deg,
+                sun_elevation_deg=sun_elevation_deg,
+                r_moon=r_moon,
+                candidate_id=f"cand_{idx + 1}",
+            )
+            if evaluated is None:
+                continue
+            if best_for_bearing is None or (evaluated["is_valid"], evaluated["score"]) > (
+                best_for_bearing["is_valid"],
+                best_for_bearing["score"],
+            ):
+                best_for_bearing = evaluated
 
-        cand_slope = compute_point_slope_deg(reader, cand_lat, cand_lon, r_moon=r_moon)
-        slope_info = classify_slope(cand_slope)
+        if best_for_bearing is not None:
+            candidates.append(best_for_bearing)
 
-        _, _, cand_dist_to_target = geod.inv(cand_lon, cand_lat, target_lon, target_lat)
-        dist_progress_m = current_dist_to_target - cand_dist_to_target
-
-        cand_illum = estimate_solar_illumination(
-            reader, cand_lat, cand_lon, sun_azimuth_deg, sun_elevation_deg, r_moon=r_moon
+    # Exact Target Snap when within 1.45x nominal reach so the rover lands directly on target without overshoot
+    if 0.0 < current_dist_to_target <= step_distance_m * 1.45:
+        target_snap = _evaluate_step_candidate(
+            reader=reader,
+            geod=geod,
+            cand_lat=float(target_lat),
+            cand_lon=float(target_lon),
+            bearing=float(az_to_target),
+            cand_step_dist=float(current_dist_to_target),
+            nominal_step_dist=step_distance_m,
+            current_dist_to_target=current_dist_to_target,
+            target_lat=target_lat,
+            target_lon=target_lon,
+            base_lat=base_lat,
+            base_lon=base_lon,
+            current_battery_wh=current_battery_wh,
+            sun_azimuth_deg=sun_azimuth_deg,
+            sun_elevation_deg=sun_elevation_deg,
+            r_moon=r_moon,
+            candidate_id="cand_target",
         )
-
-        new_bat, delta_wh, reserve_pct = compute_leg_power(
-            step_distance_m, cand_slope, cand_illum, current_battery_wh
-        )
-
-        cand_los, cand_clearance = check_surface_los(
-            reader, base_lat, base_lon, cand_lat, cand_lon, r_moon=r_moon
-        )
-
-        is_valid = True
-        rejection_reasons = []
-
-        if cand_slope > MAX_TRAVERSABLE_SLOPE_DEG:
-            is_valid = False
-            rejection_reasons.append(f"Excessive slope ({cand_slope:.1f}° > 15° limit)")
-        if reserve_pct < MIN_BATTERY_RESERVE_PCT:
-            is_valid = False
-            rejection_reasons.append(f"Low battery reserve ({reserve_pct:.1f}% < 20%)")
-
-        # Ranking score: progress to destination + solar bonus + los bonus - slope penalty
-        score = (
-            dist_progress_m
-            + (cand_illum * 150.0)
-            + (100.0 if cand_los else 0.0)
-            - (cand_slope * 20.0)
-        )
-
-        candidates.append({
-            "candidate_id": f"cand_{idx + 1}",
-            "coordinates": {
-                "latitude_deg": round(cand_lat, 6),
-                "longitude_deg": round(cand_lon, 6),
-                "elevation_m": round(float(cand_elev), 1),
-            },
-            "step_bearing_deg": round(float(bearing % 360.0), 1),
-            "step_distance_m": round(float(step_distance_m), 1),
-            "distance_to_target_m": round(float(cand_dist_to_target), 1),
-            "distance_progress_m": round(float(dist_progress_m), 1),
-            "slope_deg": round(float(cand_slope), 1),
-            "slope_band": slope_info["status"],
-            "illumination_fraction": round(float(cand_illum), 3),
-            "battery_wh": round(float(new_bat), 1),
-            "battery_reserve_pct": round(float(reserve_pct), 1),
-            "battery_delta_wh": round(float(delta_wh), 1),
-            "los_to_base": bool(cand_los),
-            "los_clearance_m": round(float(cand_clearance), 1),
-            "is_valid": is_valid,
-            "rejection_reasons": rejection_reasons,
-            "score": round(float(score), 1),
-        })
+        if target_snap is not None:
+            target_snap["distance_to_target_m"] = 0.0
+            target_snap["distance_progress_m"] = round(float(current_dist_to_target), 1)
+            if target_snap["is_valid"]:
+                target_snap["score"] = round(target_snap["score"] + 250.0, 1)
+            if len(candidates) >= num_candidates:
+                worst_idx = min(
+                    range(len(candidates)),
+                    key=lambda i: (candidates[i]["is_valid"], candidates[i]["score"]),
+                )
+                candidates[worst_idx] = target_snap
+            else:
+                candidates.append(target_snap)
 
     # If steep rim walls block every direct candidate, synthesize a diagonal switchback on the gentlest forward leg
     if candidates and not any(c["is_valid"] for c in candidates):
@@ -479,6 +572,7 @@ def plan_automatic_traverse(
             break
 
         best_cand = valid_cands[0]
+        arrived = best_cand["distance_to_target_m"] <= 5.0
         curr_lat = best_cand["coordinates"]["latitude_deg"]
         curr_lon = best_cand["coordinates"]["longitude_deg"]
         curr_bat = best_cand["battery_wh"]
@@ -488,14 +582,16 @@ def plan_automatic_traverse(
             "waypoint_index": step,
             "coordinates": best_cand["coordinates"],
             "distance_from_start_m": round(float(total_dist_traversed), 1),
-            "distance_to_target_m": best_cand["distance_to_target_m"],
+            "distance_to_target_m": 0.0 if arrived else best_cand["distance_to_target_m"],
             "slope_deg": best_cand["slope_deg"],
             "illumination_fraction": best_cand["illumination_fraction"],
             "battery_wh": best_cand["battery_wh"],
             "battery_reserve_pct": best_cand["battery_reserve_pct"],
             "los_to_base": best_cand["los_to_base"],
-            "action": f"STEP_{step}",
+            "action": "ARRIVE_RESEARCH_TARGET" if arrived else f"STEP_{step}",
         })
+        if arrived:
+            break
     else:
         status = "FEASIBLE"  # Reached max steps limit
 

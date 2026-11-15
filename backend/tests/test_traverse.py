@@ -218,3 +218,47 @@ def test_regional_crater_and_rim_automatic_traverse(real_dem_reader):
     assert haworth_plan["waypoints"][-1]["distance_to_target_m"] == 0.0
 
 
+def test_variable_length_stepping_and_exact_target_snap(real_dem_reader):
+    from pyproj import Geod
+    from backend.terrain.geometry import R_MOON_M
+
+    geod = Geod(a=R_MOON_M, b=R_MOON_M)
+    start_lat, start_lon = -89.465, -137.86
+
+    # Long target (~1200 m away): candidates across bearings adapt step_distance_m to terrain
+    far_lon, far_lat, _ = geod.fwd(start_lon, start_lat, 135.0, 1200.0)
+    far_res = suggest_next_waypoints(
+        reader=real_dem_reader,
+        current_lat=start_lat,
+        current_lon=start_lon,
+        target_lat=float(far_lat),
+        target_lon=float(far_lon),
+        base_lat=start_lat,
+        base_lon=start_lon,
+        current_battery_wh=1000.0,
+        step_distance_m=250.0,
+        num_candidates=8,
+    )
+    step_lengths = {c["step_distance_m"] for c in far_res["candidates"]}
+    assert len(step_lengths) >= 2
+
+    # Within 1.45x nominal reach (~320 m away with 250 m scale): top candidate snaps directly to target (0m rem)
+    near_lon, near_lat, _ = geod.fwd(start_lon, start_lat, 120.0, 320.0)
+    snap_res = suggest_next_waypoints(
+        reader=real_dem_reader,
+        current_lat=start_lat,
+        current_lon=start_lon,
+        target_lat=float(near_lat),
+        target_lon=float(near_lon),
+        base_lat=start_lat,
+        base_lon=start_lon,
+        current_battery_wh=1000.0,
+        step_distance_m=250.0,
+        num_candidates=8,
+    )
+    top = snap_res["candidates"][0]
+    assert top["distance_to_target_m"] == 0.0
+    assert abs(top["step_distance_m"] - 320.0) < 5.0
+
+
+

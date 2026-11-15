@@ -653,19 +653,20 @@ export function App() {
         const last = prev[prev.length - 1]
         const prevDist = last?.distance_from_start_m ?? 0
         const nextIdx = prev.length
+        const arrived = cand.distance_to_target_m <= 5.0
         return [
           ...prev,
           {
             waypoint_index: nextIdx,
             coordinates: cand.coordinates,
             distance_from_start_m: Number((prevDist + cand.step_distance_m).toFixed(1)),
-            distance_to_target_m: cand.distance_to_target_m,
+            distance_to_target_m: arrived ? 0 : cand.distance_to_target_m,
             slope_deg: cand.slope_deg,
             illumination_fraction: cand.illumination_fraction,
             battery_wh: cand.battery_wh,
             battery_reserve_pct: cand.battery_reserve_pct,
             los_to_base: cand.los_to_base,
-            action: `STEP_${nextIdx}`,
+            action: arrived ? 'ARRIVE_RESEARCH_TARGET' : `STEP_${nextIdx}`,
           },
         ]
       })
@@ -1638,10 +1639,10 @@ export function App() {
                     </div>
                   )}
 
-                  {/* Step Size & Actions Row */}
+                  {/* Step Range & Actions Row */}
                   <div className="flex items-center justify-between gap-1.5">
-                    <div className="flex items-center gap-1">
-                      <span className="text-[8px] font-mono-tech text-slate-500 uppercase">Step</span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className="text-[8px] font-mono-tech text-slate-500 uppercase">Range</span>
                       {(traverseTarget && traverseTarget.distance_from_base_m > 2500
                         ? ([1000, 2500, 5000] as const)
                         : ([150, 250, 400] as const)
@@ -1656,11 +1657,12 @@ export function App() {
                               : 'border-white/10 text-slate-400 hover:text-white'
                           }`}
                         >
-                          {sz >= 1000 ? `${sz / 1000}km` : `${sz}m`}
+                          ~{sz >= 1000 ? `${sz / 1000}km` : `${sz}m`}
                         </button>
                       ))}
+                      <span className="text-[7px] font-mono-tech text-cyan-300/80">(Auto-Varies)</span>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 shrink-0">
                       {traverseMode === 'manual' && traverseWaypoints.length > 1 && (
                         <button
                           type="button"
@@ -1691,8 +1693,11 @@ export function App() {
                         </div>
                       ) : latestWaypoint?.action === 'ARRIVE_RESEARCH_TARGET' ? (
                         <div className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-2 text-[9px] font-mono-tech text-emerald-200">
-                          Arrived at Research Destination ({Math.round(latestWaypoint.distance_from_start_m)}m total traverse ·{' '}
-                          {Math.round(latestWaypoint.battery_wh)} Wh remaining).
+                          Arrived at Research Destination (
+                          {latestWaypoint.distance_from_start_m >= 1000
+                            ? `${(latestWaypoint.distance_from_start_m / 1000).toFixed(2)}km`
+                            : `${Math.round(latestWaypoint.distance_from_start_m)}m`}{' '}
+                          total traverse · {Math.round(latestWaypoint.battery_wh)} Wh remaining).
                         </div>
                       ) : latestWaypoint && latestWaypoint.distance_to_target_m <= traverseStepDistanceM * 0.75 ? (
                         <button
@@ -1733,9 +1738,11 @@ export function App() {
                                         @ {Math.round(cand.step_bearing_deg)}°
                                       </span>
                                       <span className="text-pink-300 tabular-nums">
-                                        {cand.distance_to_target_m >= 1000
-                                          ? `${(cand.distance_to_target_m / 1000).toFixed(1)}km to target`
-                                          : `${Math.round(cand.distance_to_target_m)}m to target`}
+                                        {cand.distance_to_target_m <= 5.0
+                                          ? 'DIRECT TOUCHDOWN'
+                                          : cand.distance_to_target_m >= 1000
+                                            ? `${(cand.distance_to_target_m / 1000).toFixed(1)}km to target`
+                                            : `${Math.round(cand.distance_to_target_m)}m to target`}
                                       </span>
                                     </div>
                                     <div className="flex items-center justify-between text-[8px] font-mono-tech mt-1 tabular-nums text-slate-400">
@@ -1966,34 +1973,45 @@ export function App() {
               <div className="text-[9px] font-mono-tech tracking-[0.16em] text-slate-500 uppercase">
                 3D Scene Legend
               </div>
-              <div className="space-y-1 text-[9px] font-mono-tech tracking-wider uppercase text-slate-300">
+              <div className="space-y-1.5 text-[9px] font-mono-tech tracking-wider uppercase text-slate-300">
                 <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0" />
-                  <span>Lander &amp; Observer Mast ({observerHeightM}m)</span>
+                  <svg width="14" height="14" viewBox="0 0 32 32" className="shrink-0" aria-hidden="true">
+                    <polygon points="16,2 28,9 28,23 16,30 4,23 4,9" fill="#061318" stroke="#2dd4bf" strokeWidth="2.5" />
+                    <rect x="11" y="11" width="10" height="7" rx="1.5" fill="none" stroke="#6ee7b7" strokeWidth="2" />
+                    <circle cx="16" cy="6" r="2.5" fill="#34d399" />
+                  </svg>
+                  <span>Initial Landing Site · Base Pod ({observerHeightM}m)</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="w-3 h-[2px] bg-amber-400 shrink-0" />
+                  <span className="w-3.5 h-[2px] bg-amber-400 shrink-0" />
                   <span>Sun Line-of-Sight Vector</span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="w-3 h-[2px] bg-emerald-400 shrink-0" />
+                  <span className="w-3.5 h-[2px] bg-emerald-400 shrink-0" />
                   <span>Earth DTE Vector (Rose = Blocked)</span>
                 </div>
                 {traverseOpen && (
                   <>
                     <div className="flex items-center gap-2">
-                      <span className="w-3 h-[2px] bg-cyan-400 shrink-0" />
-                      <span>Rover Traverse Path (3D Waypoints)</span>
+                      <svg width="14" height="14" viewBox="0 0 34 34" className="shrink-0" aria-hidden="true">
+                        <path d="M5,10 V5 H10 M24,5 H29 V10 M5,24 V29 H10 M24,29 H29 V24" fill="none" stroke="#38bdf8" strokeWidth="2.5" />
+                        <polygon points="17,5 29,17 17,29 5,17" fill="#1a0918" stroke="#f472b6" strokeWidth="2.5" />
+                        <circle cx="17" cy="17" r="3" fill="#f472b6" />
+                      </svg>
+                      <span>Research Target Location (PSR / Rim)</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-pink-400 shrink-0" />
-                      <span>Research Target Destination</span>
+                      <span className="inline-flex items-center w-3.5 shrink-0">
+                        <span className="w-2.5 h-[2px] bg-cyan-400" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 -ml-0.5" />
+                      </span>
+                      <span>Rover Traverse Path &amp; Waypoints</span>
                     </div>
                   </>
                 )}
                 {workspace.recommendations && workspace.recommendations.candidates.length > 0 && (
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full border border-cyan-300 shrink-0" />
+                    <span className="w-3 h-3 ml-0.5 rounded-full border border-cyan-300 shrink-0" />
                     <span>Safe Havens (&lt;8° Slope)</span>
                   </div>
                 )}
