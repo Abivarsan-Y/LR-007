@@ -406,7 +406,9 @@ export function LunarStage3D({
         )
         const offset = (y * spriteSize + x) * 4
         spritePixels.fill(255, offset, offset + 3)
-        spritePixels[offset + 3] = Math.round(255 * Math.max(0, 1 - radius * radius) ** 2)
+        const core = Math.exp(-radius * radius * 10)
+        const halo = 0.38 * Math.max(0, 1 - radius) ** 2
+        spritePixels[offset + 3] = Math.round(255 * Math.min(1, core + halo))
       }
     }
     const starSprite = new THREE.DataTexture(spritePixels, spriteSize, spriteSize)
@@ -414,19 +416,30 @@ export function LunarStage3D({
     starSprite.minFilter = THREE.LinearFilter
     starSprite.needsUpdate = true
 
+    const bandTilt = new THREE.Euler(0.85, 0, 0.42, 'ZYX')
+    const starDirection = new THREE.Vector3()
     const starLayers = [
-      { count: 1900, size: 0.065, color: 0xc5d9fa, opacity: 0.44 },
-      { count: 350, size: 0.16, color: 0xdceaff, opacity: 0.70 },
-      { count: 90, size: 0.34, color: 0xfff2dc, opacity: 0.88 },
-    ].map(({ count, size, color, opacity }) => {
+      { count: 14500, size: 0.18, color: 0xb8c9ff, opacity: 0.57, band: false },
+      { count: 17500, size: 0.16, color: 0xb8c9ff, opacity: 0.50, band: true },
+      { count: 2900, size: 0.26, color: 0xd1e1ff, opacity: 0.76, band: false },
+      { count: 430, size: 0.48, color: 0xeaf4ff, opacity: 0.96, band: false },
+      { count: 90, size: 1.25, color: 0xa6cdff, opacity: 1, band: false },
+      { count: 34, size: 0.84, color: 0xffebd5, opacity: 0.93, band: false },
+    ].map(({ count, size, color, opacity, band }) => {
       const positions = new Float32Array(count * 3)
       for (let i = 0; i < count; i++) {
         const theta = Math.random() * Math.PI * 2
-        const phi = Math.acos(2 * Math.random() - 1)
+        // Vary the band's width and center to create knots and sparse patches.
+        const bandWidth = 0.20 + 0.085 * Math.sin(theta * 7)
+        const bandCenter = 0.07 * Math.sin(theta * 3 + 0.6)
+        const y = band
+          ? bandCenter + (Math.random() + Math.random() - 1) * bandWidth
+          : 2 * Math.random() - 1
+        const horizontal = Math.sqrt(1 - y * y)
         const radius = 36 + Math.random() * 16
-        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta)
-        positions[i * 3 + 1] = radius * Math.cos(phi)
-        positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
+        starDirection.set(horizontal * Math.cos(theta), y, horizontal * Math.sin(theta))
+        if (band) starDirection.applyEuler(bandTilt)
+        starDirection.multiplyScalar(radius).toArray(positions, i * 3)
       }
       const geometry = new THREE.BufferGeometry()
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
@@ -439,6 +452,7 @@ export function LunarStage3D({
         depthWrite: false,
       })
       const points = new THREE.Points(geometry, material)
+      points.renderOrder = -1
       scene.add(points)
       return points
     })

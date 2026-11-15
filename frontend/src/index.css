@@ -192,10 +192,9 @@ input[type="range"].hud-range::-moz-range-thumb {
 .lunar-explorer {
   isolation: isolate;
   background:
-    radial-gradient(ellipse at 47% 49%, #142a4d 0%, transparent 55%),
-    radial-gradient(ellipse at 86% 20%, #131b3a 0%, transparent 47%),
-    radial-gradient(ellipse at 16% 77%, #0e2343 0%, transparent 49%),
-    #040811;
+    radial-gradient(ellipse at 78% 24%, #182448 0%, transparent 52%),
+    radial-gradient(ellipse at 22% 82%, #101f40 0%, transparent 53%),
+    #030610;
 }
 .lunar-explorer::before {
   content: "";
@@ -203,9 +202,9 @@ input[type="range"].hud-range::-moz-range-thumb {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(ellipse at 52% 38%, #407fcc19, transparent 62%),
-    radial-gradient(ellipse at 35% 68%, #2c59bf20, transparent 64%),
-    radial-gradient(ellipse at 77% 23%, #5d63ba12, transparent 45%);
+    radial-gradient(ellipse at 81% 18%, #7a82ff26, transparent 35%),
+    radial-gradient(ellipse at 22% 74%, #5284e52b, transparent 39%),
+    linear-gradient(144deg, transparent 24%, #3847710a 39%, #647edc21 51%, #2e49821a 59%, transparent 75%);
 }
 
 .lunar-explorer, .lunar-explorer .font-mono-tech {
