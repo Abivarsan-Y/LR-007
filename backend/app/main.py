@@ -18,6 +18,8 @@ from backend.app.schemas.science import (
     ExportFormat,
     ExportRequest,
     RecommendRequest,
+    TraverseManualRequest,
+    TraverseAutomaticRequest,
 )
 from backend.app.services import (
     RecommendationUnavailableError,
@@ -181,6 +183,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def export_post(payload: ExportRequest) -> Response:
         """Export an analyzed scenario from POST parameters as JSON or CSV."""
         return _build_export_response(service, payload)
+
+    @application.post("/api/traverse/manual", tags=["traverse"])
+    def traverse_manual(
+        payload: TraverseManualRequest, response: Response
+    ) -> dict[str, Any]:
+        """Suggest candidate forward waypoints towards a research destination with slope, solar and Base Pod LOS."""
+        response.headers["Cache-Control"] = "no-store"
+        return service.run_traverse_manual(payload)
+
+    @application.post("/api/traverse/automatic", tags=["traverse"])
+    def traverse_automatic(
+        payload: TraverseAutomaticRequest, response: Response
+    ) -> dict[str, Any]:
+        """Plan autonomous optimal multi-waypoint rover traverse to research destination."""
+        response.headers["Cache-Control"] = "no-store"
+        return service.run_traverse_automatic(payload)
 
     return application
 

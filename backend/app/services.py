@@ -24,7 +24,11 @@ from backend.app.schemas.science import (
     RecommendRequest,
     ScenarioInput,
     SiteDocument,
+    TraverseManualRequest,
+    TraverseAutomaticRequest,
 )
+from backend.terrain.ingest import LolaDemReader
+from backend.terrain.traverse import suggest_next_waypoints, plan_automatic_traverse
 from backend.engine.analysis import build_analysis
 from backend.engine.ephemeris import (
     CacheMiss,
@@ -484,3 +488,48 @@ class ScienceService:
             return content, "application/json", f"{safe_id}.json"
         content = _format_analysis_csv(analysis)
         return content, "text/csv; charset=utf-8", f"{safe_id}.csv"
+
+    def _get_dem_reader(self) -> LolaDemReader:
+        if not hasattr(self, "_cached_dem_reader") or self._cached_dem_reader is None:
+            dem_path = Path("data/raw/LDEM_80S_80MPP_ADJ.TIF")
+            if not dem_path.exists():
+                raise ResourceNotFoundError(f"LOLA DEM GeoTIFF not found at: {dem_path}")
+            self._cached_dem_reader = LolaDemReader(dem_path)
+        return self._cached_dem_reader
+
+    def run_traverse_manual(self, request: TraverseManualRequest) -> dict[str, Any]:
+        reader = self._get_dem_reader()
+        base_lat = request.base_latitude_deg if request.base_latitude_deg is not None else request.current_latitude_deg
+        base_lon = request.base_longitude_deg if request.base_longitude_deg is not None else request.current_longitude_deg
+        return suggest_next_waypoints(
+            reader=reader,
+            current_lat=request.current_latitude_deg,
+            current_lon=request.current_longitude_deg,
+            target_lat=request.target_latitude_deg,
+            target_lon=request.target_longitude_deg,
+            base_lat=base_lat,
+            base_lon=base_lon,
+            current_battery_wh=request.current_battery_wh,
+            step_distance_m=request.step_distance_m,
+            num_candidates=request.num_candidates,
+            sun_azimuth_deg=request.sun_azimuth_deg,
+            sun_elevation_deg=request.sun_elevation_deg,
+        )
+
+    def run_traverse_automatic(self, request: TraverseAutomaticRequest) -> dict[str, Any]:
+        reader = self._get_dem_reader()
+        return plan_automatic_traverse(
+            reader=reader,
+            start_lat=request.start_latitude_deg,
+            start_lon=request.start_longitude_deg,
+            target_lat=request.target_latitude_deg,
+            target_lon=request.target_longitude_deg,
+            base_lat=request.base_latitude_deg,
+            base_lon=request.base_longitude_deg,
+            initial_battery_wh=request.initial_battery_wh,
+            step_m=request.step_m,
+            max_steps=request.max_steps,
+            sun_azimuth_deg=request.sun_azimuth_deg,
+            sun_elevation_deg=request.sun_elevation_deg,
+        )
+
