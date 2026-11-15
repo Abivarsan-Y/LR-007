@@ -249,6 +249,15 @@ export interface TraverseManualCandidate {
   battery_wh: number
   battery_reserve_pct: number
   battery_delta_wh: number
+  battery_before_regen_wh?: number
+  effective_speed_mps?: number
+  drive_duration_hours?: number
+  regen_dwell_hours?: number
+  regen_energy_wh?: number
+  arrival_met_hours?: number
+  met_hours?: number
+  sun_azimuth_deg?: number
+  sun_elevation_deg?: number
   los_to_base: boolean
   los_clearance_m: number
   is_valid: boolean
@@ -287,6 +296,15 @@ export interface TraverseWaypoint {
   illumination_fraction: number
   battery_wh: number
   battery_reserve_pct: number
+  battery_before_regen_wh?: number
+  effective_speed_mps?: number
+  drive_duration_hours?: number
+  regen_dwell_hours?: number
+  regen_energy_wh?: number
+  arrival_met_hours?: number
+  met_hours?: number
+  sun_azimuth_deg?: number
+  sun_elevation_deg?: number
   los_to_base: boolean
   action: string
 }
@@ -300,6 +318,9 @@ export interface TraverseAutomaticResponse {
   summary: {
     total_waypoints: number
     total_traverse_distance_m: number
+    total_traverse_hours?: number
+    total_regen_hours?: number
+    regen_stops_count?: number
     max_slope_deg: number
     avg_slope_deg: number
     avg_illumination_fraction: number
@@ -308,6 +329,32 @@ export interface TraverseAutomaticResponse {
     base_los_fraction: number
   }
   waypoints: TraverseWaypoint[]
+}
+
+export interface PointEvaluateResponse {
+  in_dem_coverage: boolean
+  latitude_deg: number
+  longitude_deg: number
+  elevation_m: number | null
+  slope_deg: number | null
+  slope_band: SlopeBand
+  horizon_angles: number[]
+}
+
+export interface RoverPlaybackState {
+  metHours: number
+  latitudeDeg: number
+  longitudeDeg: number
+  elevationM: number
+  batteryWh: number
+  batteryReservePct: number
+  illuminationFraction: number
+  losToBase: boolean
+  isRegenerating: boolean
+  activeSegmentIndex: number
+  sunAzimuthDeg: number
+  sunElevationDeg: number
+  statusLabel: string
 }
 
 export type TraverseTargetCategory = 'water_ice_crater' | 'mapped_site_rim' | 'safe_haven' | 'custom'

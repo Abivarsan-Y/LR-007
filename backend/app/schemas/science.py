@@ -315,6 +315,7 @@ class TraverseManualRequest(BaseModel):
     num_candidates: int = Field(default=8, ge=2, le=24)
     sun_azimuth_deg: float = Field(default=180.0, ge=0.0, lt=360.0)
     sun_elevation_deg: float = Field(default=1.0, ge=-90.0, le=90.0)
+    current_met_hours: float = Field(default=0.0, ge=0.0, le=1000.0)
 
 
 class TraverseAutomaticRequest(BaseModel):
@@ -333,4 +334,15 @@ class TraverseAutomaticRequest(BaseModel):
     max_steps: int = Field(default=40, ge=1, le=100)
     sun_azimuth_deg: float = Field(default=180.0, ge=0.0, lt=360.0)
     sun_elevation_deg: float = Field(default=1.0, ge=-90.0, le=90.0)
+    start_met_hours: float = Field(default=0.0, ge=0.0, le=1000.0)
+
+
+class PointEvaluateRequest(BaseModel):
+    """Request DEM terrain, slope, and 360-degree horizon evaluation for any coordinate."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid", allow_inf_nan=False)
+
+    latitude_deg: float = Field(ge=-90.0, le=90.0)
+    longitude_deg: float = Field(ge=-180.0, le=360.0)
+    observer_height_m: float = Field(default=2.0, ge=0.0, le=100.0)
 

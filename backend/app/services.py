@@ -20,6 +20,7 @@ from backend.app.schemas.science import (
     DiffRequest,
     ExportFormat,
     ExportRequest,
+    PointEvaluateRequest,
     RecommendDocument,
     RecommendRequest,
     ScenarioInput,
@@ -28,7 +29,11 @@ from backend.app.schemas.science import (
     TraverseAutomaticRequest,
 )
 from backend.terrain.ingest import LolaDemReader
-from backend.terrain.traverse import suggest_next_waypoints, plan_automatic_traverse
+from backend.terrain.traverse import (
+    evaluate_surface_point,
+    plan_automatic_traverse,
+    suggest_next_waypoints,
+)
 from backend.engine.analysis import build_analysis
 from backend.engine.ephemeris import (
     CacheMiss,
@@ -514,6 +519,7 @@ class ScienceService:
             num_candidates=request.num_candidates,
             sun_azimuth_deg=request.sun_azimuth_deg,
             sun_elevation_deg=request.sun_elevation_deg,
+            current_met_hours=request.current_met_hours,
         )
 
     def run_traverse_automatic(self, request: TraverseAutomaticRequest) -> dict[str, Any]:
@@ -531,5 +537,15 @@ class ScienceService:
             max_steps=request.max_steps,
             sun_azimuth_deg=request.sun_azimuth_deg,
             sun_elevation_deg=request.sun_elevation_deg,
+            start_met_hours=request.start_met_hours,
+        )
+
+    def run_point_evaluate(self, request: PointEvaluateRequest) -> dict[str, Any]:
+        reader = self._get_dem_reader()
+        return evaluate_surface_point(
+            reader=reader,
+            lat_deg=request.latitude_deg,
+            lon_deg=request.longitude_deg,
+            observer_height_m=request.observer_height_m,
         )
 

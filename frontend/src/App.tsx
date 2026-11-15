@@ -23,14 +23,18 @@ import {
   X,
 } from 'lucide-react'
 import {
+  advanceSolarGeometry,
   buildCustomCoordinateWorkspace,
   buildResearchTargetOptions,
   CATALOG_SITES,
   classifySlopeBand,
+  computeStepKinematicsAndPower,
   exportAnalysisReport,
   formatLatLonCompact,
   interpolateHorizonSample,
+  interpolateRoverPositionAtTime,
   loadCatalogSiteWorkspace,
+  loadCustomCoordinateWorkspace,
   normalizeLongitudeDeg,
   POLAR_LANDMARKS,
   requestTraverseAutomatic,
@@ -162,6 +166,8 @@ export function App() {
   const [traverseCandidates, setTraverseCandidates] = useState<TraverseManualCandidate[]>([])
   const [traverseAutoResult, setTraverseAutoResult] = useState<TraverseAutomaticResponse | null>(null)
   const [traverseLoading, setTraverseLoading] = useState(false)
+  const [roverSimHours, setRoverSimHours] = useState(0)
+  const [isRoverPlaying, setIsRoverPlaying] = useState(false)
   const traverseRequestSeq = useRef(0)
   const traverseSectionRef = useRef<HTMLElement>(null)
 
@@ -203,8 +209,8 @@ export function App() {
       lat: number,
       lon: number,
       label: string,
-      elevM = 0,
-      horizonAngles: number[] = Array.from({ length: 72 }, () => 1.5),
+      elevM?: number,
+      horizonAngles: number[] = [],
       zoomSurface = true,
     ) => {
       setDetailsVisible(true)
@@ -221,7 +227,8 @@ export function App() {
       if (zoomSurface) setDesiredCameraMode('SURFACE')
       setCameraPresetNonce(n => n + 1)
 
-      requestSequence.current += 1
+      const sequence = ++requestSequence.current
+      const existingDem = workspace?.demTerrain ?? null
       setLoadingTarget(false)
       setLoadError('')
       const custom = buildCustomCoordinateWorkspace({
@@ -231,11 +238,27 @@ export function App() {
         elevation_m: elevM,
         observerHeightM,
         horizonAnglesDeg: horizonAngles,
+        demTerrain: existingDem,
       })
       setWorkspace(custom)
       setSampleIndex(0)
+      setRoverSimHours(0)
+      setIsRoverPlaying(false)
+
+      if (horizonAngles.length < 36) {
+        void loadCustomCoordinateWorkspace({
+          label,
+          latitude_deg: lat,
+          longitude_deg: lon,
+          observerHeightM,
+          demTerrain: existingDem,
+        }).then(loaded => {
+          if (sequence !== requestSequence.current) return
+          setWorkspace(loaded)
+        })
+      }
     },
-    [observerHeightM],
+    [observerHeightM, workspace?.demTerrain],
   )
 
   const clearSelection = useCallback(() => {
@@ -253,6 +276,8 @@ export function App() {
     setTraverseWaypoints([])
     setTraverseCandidates([])
     setTraverseAutoResult(null)
+    setRoverSimHours(0)
+    setIsRoverPlaying(false)
     setDesiredCameraMode('ORBITAL')
     setCameraPresetNonce(n => n + 1)
   }, [])
@@ -274,7 +299,32 @@ export function App() {
   const handleMastToggle = useCallback(async (nextMast: 2 | 5) => {
     if (nextMast === observerHeightM || (nextMast === 5 && workspace?.target.catalogEntry?.hasVerifiedAnalysis)) return
     setObserverHeightM(nextMast)
-    if (workspace?.target.catalogEntry) await selectCatalogSite(workspace.target.catalogEntry, false, nextMast)
+    if (workspace?.target.catalogEntry) {
+      await selectCatalogSite(workspace.target.catalogEntry, false, nextMast)
+      return
+    }
+    if (workspace && !workspace.target.isCatalogSite) {
+      const sequence = ++requestSequence.current
+      const immediate = buildCustomCoordinateWorkspace({
+        label: workspace.target.name,
+        latitude_deg: workspace.target.latitude_deg,
+        longitude_deg: workspace.target.longitude_deg,
+        elevation_m: workspace.target.elevation_m,
+        slopeDeg: workspace.effectiveSlopeDeg,
+        observerHeightM: nextMast,
+        horizonAnglesDeg: [],
+        demTerrain: workspace.demTerrain,
+      })
+      setWorkspace(immediate)
+      const evaluated = await loadCustomCoordinateWorkspace({
+        label: workspace.target.name,
+        latitude_deg: workspace.target.latitude_deg,
+        longitude_deg: workspace.target.longitude_deg,
+        observerHeightM: nextMast,
+        demTerrain: workspace.demTerrain,
+      })
+      if (sequence === requestSequence.current) setWorkspace(evaluated)
+    }
   }, [observerHeightM, workspace, selectCatalogSite])
 
   // Handle clicks anywhere on the 3D Moon or inside the real 129x129 DEM patch
@@ -307,9 +357,12 @@ export function App() {
       }
 
       setDetailsVisible(true)
+      setLeftSidebarOpen(true)
+      setRightSidebarOpen(true)
       setFocusCoords({ latitude_deg: pick.latitude_deg, longitude_deg: pick.longitude_deg })
       setSearchQuery(formatLatLonCompact(pick.latitude_deg, pick.longitude_deg))
-      requestSequence.current += 1
+      const sequence = ++requestSequence.current
+      const existingDem = workspace?.demTerrain ?? null
       setLoadingTarget(false)
       setLoadError('')
       setWorkspace(
@@ -318,11 +371,28 @@ export function App() {
           latitude_deg: pick.latitude_deg,
           longitude_deg: pick.longitude_deg,
           elevation_m: pick.elevation_m,
+          slopeDeg: pick.slope_deg,
           observerHeightM,
           horizonAnglesDeg: pick.horizonAnglesDeg,
+          demTerrain: existingDem,
         }),
       )
       setSampleIndex(0)
+      setRoverSimHours(0)
+      setIsRoverPlaying(false)
+
+      if (pick.horizonAnglesDeg.length < 36) {
+        void loadCustomCoordinateWorkspace({
+          label: pick.label,
+          latitude_deg: pick.latitude_deg,
+          longitude_deg: pick.longitude_deg,
+          observerHeightM,
+          demTerrain: existingDem,
+        }).then(loaded => {
+          if (sequence !== requestSequence.current) return
+          setWorkspace(loaded)
+        })
+      }
     },
     [observerHeightM, selectCatalogSite, workspace],
   )
@@ -360,10 +430,23 @@ export function App() {
     }
   }, [dropdownOpen, polarOpen, workspace])
 
-  // Synchronized Timeline Playback
+  // Synchronized Timeline & Rover Playback
   const samples = workspace?.analysis.samples ?? []
   const lastSampleIdx = Math.max(samples.length - 1, 0)
   const currentSample = samples[sampleIndex] ?? samples[0] ?? null
+  const landingSunAz = samples[0]?.sun.azimuth_deg ?? 180.0
+  const landingSunEl = samples[0]?.sun.elevation_deg ?? 1.0
+
+  const maxRoverMetHours = useMemo(() => {
+    if (!traverseWaypoints.length) return 0
+    const last = traverseWaypoints[traverseWaypoints.length - 1]
+    return last.met_hours ?? last.arrival_met_hours ?? 0
+  }, [traverseWaypoints])
+
+  const activeRoverState = useMemo(() => {
+    if (!traverseOpen || !traverseWaypoints.length) return null
+    return interpolateRoverPositionAtTime(traverseWaypoints, roverSimHours, landingSunAz, landingSunEl)
+  }, [traverseOpen, traverseWaypoints, roverSimHours, landingSunAz, landingSunEl])
 
   useEffect(() => {
     if (!playing || samples.length === 0) return
@@ -373,13 +456,35 @@ export function App() {
     }
     const timer = window.setTimeout(() => {
       setSampleIndex(prev => {
-        const next = prev + 1
+        const next = Math.min(prev + 1, lastSampleIdx)
         if (next >= lastSampleIdx) setPlaying(false)
-        return Math.min(next, lastSampleIdx)
+        if (maxRoverMetHours > 0) {
+          const nextMet = samples[next]?.met_hours ?? next * 0.5
+          setRoverSimHours(Math.min(maxRoverMetHours, nextMet))
+        }
+        return next
       })
     }, 1000 / speed)
     return () => window.clearTimeout(timer)
-  }, [playing, sampleIndex, lastSampleIdx, speed, samples.length])
+  }, [playing, sampleIndex, lastSampleIdx, speed, samples, maxRoverMetHours])
+
+  useEffect(() => {
+    if (!isRoverPlaying || maxRoverMetHours <= 0) return
+    if (roverSimHours >= maxRoverMetHours) {
+      setIsRoverPlaying(false)
+      return
+    }
+    const timer = window.setTimeout(() => {
+      const stepH = Math.max(0.05, maxRoverMetHours / 90)
+      const nextH = Math.min(maxRoverMetHours, roverSimHours + stepH)
+      setRoverSimHours(nextH)
+      if (samples.length > 0) {
+        setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(nextH * 2))))
+      }
+      if (nextH >= maxRoverMetHours) setIsRoverPlaying(false)
+    }, 110)
+    return () => window.clearTimeout(timer)
+  }, [isRoverPlaying, roverSimHours, maxRoverMetHours, samples.length, lastSampleIdx])
 
   // Filtered Search Options
   const parsedCoords = useMemo(() => parseCoordinateQuery(searchQuery), [searchQuery])
@@ -507,6 +612,7 @@ export function App() {
             target.longitude_deg,
           ).distanceM
         : 0
+      const sun0 = ws.analysis.samples[0]?.sun
       return {
         waypoint_index: 0,
         coordinates: {
@@ -519,7 +625,16 @@ export function App() {
         slope_deg: Number((ws.effectiveSlopeDeg ?? 0).toFixed(1)),
         illumination_fraction: Number(illumFraction.toFixed(3)),
         battery_wh: 1000.0,
+        battery_before_regen_wh: 1000.0,
         battery_reserve_pct: 83.3,
+        effective_speed_mps: 0.0,
+        drive_duration_hours: 0.0,
+        regen_dwell_hours: 0.0,
+        regen_energy_wh: 0.0,
+        arrival_met_hours: 0.0,
+        met_hours: 0.0,
+        sun_azimuth_deg: Number((sun0?.azimuth_deg ?? 180.0).toFixed(1)),
+        sun_elevation_deg: Number((sun0?.elevation_deg ?? 1.0).toFixed(2)),
         los_to_base: true,
         action: 'START_BASE_POD',
       }
@@ -536,6 +651,8 @@ export function App() {
       setTraverseAutoResult(null)
       setPickingTraverseTarget(false)
       setTraverseStepDistanceM(250)
+      setRoverSimHours(0)
+      setIsRoverPlaying(false)
       return
     }
     setTraverseTarget(null)
@@ -543,14 +660,14 @@ export function App() {
     setTraverseAutoResult(null)
     setTraverseCandidates([])
     setTraverseStepDistanceM(250)
+    setRoverSimHours(0)
+    setIsRoverPlaying(false)
     const initIllum = workspace.analysis.samples[0]?.sun.illumination_fraction ?? 1.0
     setTraverseWaypoints([makeBasePodWaypoint(workspace, null, initIllum)])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workspace?.target.id, makeBasePodWaypoint])
 
   // Manual Mode: fetch next forward candidate points whenever current waypoint or target changes
-  const activeSunAz = currentSample?.sun.azimuth_deg ?? 180.0
-  const activeSunEl = currentSample?.sun.elevation_deg ?? 1.0
   const latestWaypoint = traverseWaypoints[traverseWaypoints.length - 1] ?? null
 
   useEffect(() => {
@@ -577,8 +694,9 @@ export function App() {
         current_battery_wh: latestWaypoint.battery_wh,
         step_distance_m: traverseStepDistanceM,
         num_candidates: 6,
-        sun_azimuth_deg: activeSunAz,
-        sun_elevation_deg: activeSunEl,
+        sun_azimuth_deg: landingSunAz,
+        sun_elevation_deg: landingSunEl,
+        current_met_hours: latestWaypoint.met_hours ?? 0.0,
       },
       workspace.demTerrain,
       workspace.analysis.horizon,
@@ -597,8 +715,8 @@ export function App() {
     traverseTarget,
     latestWaypoint,
     traverseStepDistanceM,
-    activeSunAz,
-    activeSunEl,
+    landingSunAz,
+    landingSunEl,
   ])
 
   // Automatic Mode: compute optimal full path in one go from Base Pod to Research Target
@@ -614,6 +732,9 @@ export function App() {
     const effectiveStepM = Math.max(traverseStepDistanceM, Math.min(20000, Math.ceil(distToTargetM / 25)))
     setTraverseLoading(true)
     setTraverseCandidates([])
+    setIsRoverPlaying(false)
+    setRoverSimHours(0)
+    setSampleIndex(0)
     void requestTraverseAutomatic(
       {
         start_latitude_deg: workspace.target.latitude_deg,
@@ -625,8 +746,9 @@ export function App() {
         initial_battery_wh: 1000.0,
         step_m: effectiveStepM,
         max_steps: 40,
-        sun_azimuth_deg: activeSunAz,
-        sun_elevation_deg: activeSunEl,
+        sun_azimuth_deg: landingSunAz,
+        sun_elevation_deg: landingSunEl,
+        start_met_hours: 0.0,
       },
       workspace.demTerrain,
       workspace.analysis.horizon,
@@ -639,7 +761,7 @@ export function App() {
       .finally(() => {
         if (seq === traverseRequestSeq.current) setTraverseLoading(false)
       })
-  }, [workspace, traverseTarget, traverseStepDistanceM, activeSunAz, activeSunEl])
+  }, [workspace, traverseTarget, traverseStepDistanceM, landingSunAz, landingSunEl])
 
   useEffect(() => {
     if (!traverseOpen || traverseMode !== 'automatic' || !workspace || !traverseTarget) return
@@ -649,6 +771,8 @@ export function App() {
   const handleSelectManualCandidate = useCallback(
     (cand: TraverseManualCandidate) => {
       if (!cand.is_valid || traverseMode !== 'manual') return
+      const nextMet = cand.met_hours ?? ((latestWaypoint?.met_hours ?? 0) + (cand.drive_duration_hours ?? 0.25))
+      const hasRegen = (cand.regen_dwell_hours ?? 0) > 0
       setTraverseWaypoints(prev => {
         const last = prev[prev.length - 1]
         const prevDist = last?.distance_from_start_m ?? 0
@@ -664,62 +788,110 @@ export function App() {
             slope_deg: cand.slope_deg,
             illumination_fraction: cand.illumination_fraction,
             battery_wh: cand.battery_wh,
+            battery_before_regen_wh: cand.battery_before_regen_wh,
             battery_reserve_pct: cand.battery_reserve_pct,
+            effective_speed_mps: cand.effective_speed_mps,
+            drive_duration_hours: cand.drive_duration_hours,
+            regen_dwell_hours: cand.regen_dwell_hours,
+            regen_energy_wh: cand.regen_energy_wh,
+            arrival_met_hours: cand.arrival_met_hours,
+            met_hours: nextMet,
+            sun_azimuth_deg: cand.sun_azimuth_deg,
+            sun_elevation_deg: cand.sun_elevation_deg,
             los_to_base: cand.los_to_base,
-            action: arrived ? 'ARRIVE_RESEARCH_TARGET' : `STEP_${nextIdx}`,
+            action: arrived ? 'ARRIVE_RESEARCH_TARGET' : hasRegen ? 'SOLAR_REGEN_HOLD' : `STEP_${nextIdx}`,
           },
         ]
       })
+      setIsRoverPlaying(false)
+      setPlaying(false)
+      setRoverSimHours(nextMet)
+      if (samples.length > 0) {
+        setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(nextMet * 2))))
+      }
     },
-    [traverseMode],
+    [traverseMode, latestWaypoint, samples.length, lastSampleIdx],
   )
 
   const handleCompleteManualArrival = useCallback(() => {
-    if (!workspace || !traverseTarget) return
-    setTraverseWaypoints(prev => {
-      const last = prev[prev.length - 1]
-      if (!last || last.action === 'ARRIVE_RESEARCH_TARGET') return prev
-      const remDist = sphericalDistanceAndBearing(
-        last.coordinates.latitude_deg,
-        last.coordinates.longitude_deg,
-        traverseTarget.latitude_deg,
-        traverseTarget.longitude_deg,
-      ).distanceM
-      return [
-        ...prev,
-        {
-          waypoint_index: prev.length,
-          coordinates: {
-            latitude_deg: Number(traverseTarget.latitude_deg.toFixed(6)),
-            longitude_deg: Number(traverseTarget.longitude_deg.toFixed(6)),
-            elevation_m: Number(traverseTarget.elevation_m.toFixed(1)),
-          },
-          distance_from_start_m: Number((last.distance_from_start_m + remDist).toFixed(1)),
-          distance_to_target_m: 0,
-          slope_deg: last.slope_deg,
-          illumination_fraction: last.illumination_fraction,
-          battery_wh: last.battery_wh,
-          battery_reserve_pct: last.battery_reserve_pct,
-          los_to_base: last.los_to_base,
-          action: 'ARRIVE_RESEARCH_TARGET',
+    if (!workspace || !traverseTarget || !latestWaypoint || latestWaypoint.action === 'ARRIVE_RESEARCH_TARGET') return
+    const remDist = sphericalDistanceAndBearing(
+      latestWaypoint.coordinates.latitude_deg,
+      latestWaypoint.coordinates.longitude_deg,
+      traverseTarget.latitude_deg,
+      traverseTarget.longitude_deg,
+    ).distanceM
+    const prevMet = latestWaypoint.met_hours ?? 0
+    const kin = computeStepKinematicsAndPower(
+      remDist,
+      latestWaypoint.slope_deg,
+      latestWaypoint.illumination_fraction,
+      latestWaypoint.battery_wh,
+      prevMet,
+    )
+    const sunAfter = advanceSolarGeometry(landingSunAz, landingSunEl, kin.arrivalMetHours)
+    setTraverseWaypoints(prev => [
+      ...prev,
+      {
+        waypoint_index: prev.length,
+        coordinates: {
+          latitude_deg: Number(traverseTarget.latitude_deg.toFixed(6)),
+          longitude_deg: Number(traverseTarget.longitude_deg.toFixed(6)),
+          elevation_m: Number(traverseTarget.elevation_m.toFixed(1)),
         },
-      ]
-    })
-  }, [workspace, traverseTarget])
+        distance_from_start_m: Number((latestWaypoint.distance_from_start_m + remDist).toFixed(1)),
+        distance_to_target_m: 0,
+        slope_deg: latestWaypoint.slope_deg,
+        illumination_fraction: latestWaypoint.illumination_fraction,
+        battery_wh: kin.newBatteryWh,
+        battery_before_regen_wh: kin.batteryBeforeRegenWh,
+        battery_reserve_pct: kin.reservePct,
+        effective_speed_mps: kin.effectiveSpeedMps,
+        drive_duration_hours: kin.driveDurationHours,
+        regen_dwell_hours: kin.regenDwellHours,
+        regen_energy_wh: kin.regenEnergyWh,
+        arrival_met_hours: kin.arrivalMetHours,
+        met_hours: kin.departureMetHours,
+        sun_azimuth_deg: Number(sunAfter.sunAz.toFixed(1)),
+        sun_elevation_deg: Number(sunAfter.sunEl.toFixed(2)),
+        los_to_base: latestWaypoint.los_to_base,
+        action: 'ARRIVE_RESEARCH_TARGET',
+      },
+    ])
+    setIsRoverPlaying(false)
+    setPlaying(false)
+    setRoverSimHours(kin.departureMetHours)
+    if (samples.length > 0) {
+      setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(kin.departureMetHours * 2))))
+    }
+  }, [workspace, traverseTarget, latestWaypoint, landingSunAz, landingSunEl, samples.length, lastSampleIdx])
 
   const handleUndoTraverseStep = useCallback(() => {
-    setTraverseWaypoints(prev => (prev.length > 1 ? prev.slice(0, -1) : prev))
-  }, [])
+    setIsRoverPlaying(false)
+    setTraverseWaypoints(prev => {
+      const next = prev.length > 1 ? prev.slice(0, -1) : prev
+      const met = next[next.length - 1]?.met_hours ?? 0
+      setRoverSimHours(met)
+      if (samples.length > 0) {
+        setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(met * 2))))
+      }
+      return next
+    })
+  }, [samples.length, lastSampleIdx])
 
   const handleResetTraverse = useCallback(() => {
     if (!workspace) return
-    const illum = currentSample?.sun.illumination_fraction ?? 1.0
+    const illum = workspace.analysis.samples[0]?.sun.illumination_fraction ?? 1.0
+    setIsRoverPlaying(false)
+    setPlaying(false)
+    setRoverSimHours(0)
+    setSampleIndex(0)
     setTraverseAutoResult(null)
     setTraverseWaypoints([makeBasePodWaypoint(workspace, traverseTarget, illum)])
     if (traverseMode === 'automatic') {
       runAutomaticTraversePlan()
     }
-  }, [workspace, currentSample, makeBasePodWaypoint, traverseTarget, traverseMode, runAutomaticTraversePlan])
+  }, [workspace, makeBasePodWaypoint, traverseTarget, traverseMode, runAutomaticTraversePlan])
 
   const handleSelectTraverseTarget = useCallback(
     (nextTarget: TraverseResearchTargetOption | null) => {
@@ -727,6 +899,8 @@ export function App() {
       setPickingTraverseTarget(false)
       setTraverseAutoResult(null)
       setTraverseCandidates([])
+      setIsRoverPlaying(false)
+      setRoverSimHours(0)
       if (workspace) {
         if (nextTarget) {
           const { distanceM } = sphericalDistanceAndBearing(
@@ -743,11 +917,12 @@ export function App() {
         } else {
           setTraverseStepDistanceM(250)
         }
-        const illum = currentSample?.sun.illumination_fraction ?? 1.0
+        const illum = workspace.analysis.samples[0]?.sun.illumination_fraction ?? 1.0
+        setSampleIndex(0)
         setTraverseWaypoints([makeBasePodWaypoint(workspace, nextTarget, illum)])
       }
     },
-    [workspace, currentSample, makeBasePodWaypoint, desiredCameraMode],
+    [workspace, makeBasePodWaypoint, desiredCameraMode],
   )
 
   const handlePickTraverseTargetFromMap = useCallback(
@@ -795,13 +970,17 @@ export function App() {
     (nextMode: 'manual' | 'automatic') => {
       if (nextMode === traverseMode) return
       setTraverseMode(nextMode)
+      setIsRoverPlaying(false)
+      setPlaying(false)
+      setRoverSimHours(0)
+      setSampleIndex(0)
       if (nextMode === 'manual' && workspace) {
         setTraverseAutoResult(null)
-        const illum = currentSample?.sun.illumination_fraction ?? 1.0
+        const illum = workspace.analysis.samples[0]?.sun.illumination_fraction ?? 1.0
         setTraverseWaypoints([makeBasePodWaypoint(workspace, traverseTarget, illum)])
       }
     },
-    [traverseMode, workspace, currentSample, makeBasePodWaypoint, traverseTarget],
+    [traverseMode, workspace, makeBasePodWaypoint, traverseTarget],
   )
 
   const handleLaunchRoverPlanner = useCallback(() => {
@@ -845,6 +1024,7 @@ export function App() {
         traverseTarget={traverseOpen ? traverseTarget : null}
         researchTargets={workspace && traverseOpen ? traverseResearchTargets : []}
         pickingTraverseTarget={pickingTraverseTarget}
+        activeRoverState={activeRoverState}
         onSelectTraverseCandidate={handleSelectManualCandidate}
         onPickTraverseTarget={handlePickTraverseTargetFromMap}
         onCameraModeChange={setCameraMode}
@@ -1585,59 +1765,106 @@ export function App() {
                     )}
                   </div>
 
-                  {/* Rover Power, Solar & Base Pod LOS Status Bar */}
-                  {latestWaypoint && (
-                    <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] p-2">
+                  {/* Base Pod Comms & Solar Power Readiness */}
+                  {currentSample && (
+                    <div className="grid grid-cols-2 gap-1.5 rounded-lg bg-white/[0.025] border border-white/[0.06] px-2 py-1.5 text-[8px] font-mono-tech">
                       <div>
-                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Battery</div>
-                        <div
-                          className={`text-[10px] font-mono-tech tabular-nums mt-0.5 ${
-                            latestWaypoint.battery_reserve_pct >= 50
-                              ? 'text-emerald-300'
-                              : latestWaypoint.battery_reserve_pct >= 20
-                                ? 'text-amber-300'
-                                : 'text-rose-400'
-                          }`}
-                        >
-                          {Math.round(latestWaypoint.battery_wh)} Wh ({Math.round(latestWaypoint.battery_reserve_pct)}%)
-                        </div>
-                        <div className="w-full h-1 rounded-full bg-white/10 mt-1 overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              latestWaypoint.battery_reserve_pct >= 50
-                                ? 'bg-emerald-400'
-                                : latestWaypoint.battery_reserve_pct >= 20
-                                  ? 'bg-amber-400'
-                                  : 'bg-rose-500'
-                            }`}
-                            style={{ width: `${Math.min(100, Math.max(0, latestWaypoint.battery_reserve_pct))}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Solar Regen</div>
-                        <div className="text-[10px] font-mono-tech text-amber-300 tabular-nums mt-0.5">
-                          {Math.round(latestWaypoint.illumination_fraction * 100)}% Sun
-                        </div>
-                        <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
-                          +{Math.round(350 * latestWaypoint.illumination_fraction)}W max
-                        </div>
+                        <span className="text-slate-500 uppercase">Base Earth DTE: </span>
+                        <span className={earthIn ? 'text-emerald-300' : 'text-rose-400'}>
+                          {currentSample.earth.visible === null ? 'UNKNOWN' : earthIn ? 'LINKED' : 'OCCULTED'}
+                        </span>
+                        {workspace.analysis.metrics.earth_visible_fraction !== null && (
+                          <span className="text-slate-400 tabular-nums">
+                            {' '}({Math.round(workspace.analysis.metrics.earth_visible_fraction * 100)}% 14d)
+                          </span>
+                        )}
                       </div>
                       <div className="text-right">
-                        <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Base Pod LoS</div>
-                        <div
-                          className={`text-[10px] font-mono-tech uppercase mt-0.5 ${
-                            latestWaypoint.los_to_base ? 'text-emerald-400' : 'text-rose-400'
-                          }`}
-                        >
-                          {latestWaypoint.los_to_base ? 'LINK UP' : 'BLOCKED'}
-                        </div>
-                        <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
-                          Step #{latestWaypoint.waypoint_index}
-                        </div>
+                        <span className="text-slate-500 uppercase">Base Solar: </span>
+                        <span className={sunIn ? 'text-amber-300' : 'text-slate-400'}>
+                          {currentSample.sun.illumination_fraction !== null
+                            ? `${Math.round(currentSample.sun.illumination_fraction * 100)}%`
+                            : 'N/A'}
+                        </span>
+                        {workspace.analysis.metrics.sunlight_fraction !== null && (
+                          <span className="text-slate-400 tabular-nums">
+                            {' '}({Math.round(workspace.analysis.metrics.sunlight_fraction * 100)}% 14d)
+                          </span>
+                        )}
                       </div>
                     </div>
                   )}
+
+                  {/* Rover Power, Solar & Base Pod LOS Status Bar */}
+                  {latestWaypoint && (() => {
+                    const liveBatWh = activeRoverState ? activeRoverState.batteryWh : latestWaypoint.battery_wh
+                    const liveBatPct = activeRoverState
+                      ? activeRoverState.batteryReservePct
+                      : latestWaypoint.battery_reserve_pct
+                    const liveIllum = activeRoverState
+                      ? activeRoverState.illuminationFraction
+                      : latestWaypoint.illumination_fraction
+                    const liveLos = activeRoverState ? activeRoverState.losToBase : latestWaypoint.los_to_base
+                    const liveMet = activeRoverState
+                      ? activeRoverState.metHours
+                      : (latestWaypoint.met_hours ?? 0)
+                    return (
+                      <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] p-2">
+                        <div>
+                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">
+                            {activeRoverState?.isRegenerating ? '⚡ Charging' : 'Battery'}
+                          </div>
+                          <div
+                            className={`text-[10px] font-mono-tech tabular-nums mt-0.5 ${
+                              liveBatPct >= 50
+                                ? 'text-emerald-300'
+                                : liveBatPct >= 20
+                                  ? 'text-amber-300'
+                                  : 'text-rose-400'
+                            }`}
+                          >
+                            {Math.round(liveBatWh)} Wh ({Math.round(liveBatPct)}%)
+                          </div>
+                          <div className="w-full h-1 rounded-full bg-white/10 mt-1 overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                liveBatPct >= 50
+                                  ? 'bg-emerald-400'
+                                  : liveBatPct >= 20
+                                    ? 'bg-amber-400'
+                                    : 'bg-rose-500'
+                              }`}
+                              style={{ width: `${Math.min(100, Math.max(0, liveBatPct))}%` }}
+                            />
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Rover Solar</div>
+                          <div className="text-[10px] font-mono-tech text-amber-300 tabular-nums mt-0.5">
+                            {Math.round(liveIllum * 100)}% Sun
+                          </div>
+                          <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
+                            {activeRoverState?.isRegenerating
+                              ? '+Solar Hold'
+                              : `+${Math.round(350 * liveIllum * 0.42)}W mov`}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Base Pod LoS</div>
+                          <div
+                            className={`text-[10px] font-mono-tech uppercase mt-0.5 ${
+                              liveLos ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {liveLos ? 'LINK UP' : 'BLOCKED'}
+                          </div>
+                          <div className="text-[8px] font-mono-tech text-cyan-300 tabular-nums">
+                            T+{liveMet.toFixed(2)}h · #{latestWaypoint.waypoint_index}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
 
                   {/* Step Range & Actions Row */}
                   <div className="flex items-center justify-between gap-1.5">
@@ -1683,6 +1910,66 @@ export function App() {
                       </button>
                     </div>
                   </div>
+
+                  {/* Rover Mission Clock & Synchronized Traverse Playback */}
+                  {traverseWaypoints.length > 1 && maxRoverMetHours > 0 && (
+                    <div className="rounded-lg border border-cyan-400/20 bg-cyan-500/[0.04] px-2 py-1.5 space-y-1">
+                      <div className="flex items-center justify-between gap-1.5 text-[8px] font-mono-tech">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPlaying(false)
+                              if (isRoverPlaying) {
+                                setIsRoverPlaying(false)
+                                return
+                              }
+                              if (roverSimHours >= maxRoverMetHours) setRoverSimHours(0)
+                              setIsRoverPlaying(true)
+                            }}
+                            className="px-1.5 py-0.5 rounded border border-cyan-400/40 bg-cyan-400/15 hover:bg-cyan-400/25 text-cyan-200 inline-flex items-center gap-1 uppercase"
+                          >
+                            {isRoverPlaying ? <Pause className="w-2.5 h-2.5" /> : <Play className="w-2.5 h-2.5" />}
+                            {isRoverPlaying ? 'Pause' : 'Play'}
+                          </button>
+                          <span className="text-slate-200 tabular-nums">
+                            MET +{roverSimHours.toFixed(2)}h / +{maxRoverMetHours.toFixed(2)}h
+                          </span>
+                        </div>
+                        <span
+                          className={`truncate ${
+                            activeRoverState?.isRegenerating ? 'text-amber-300' : 'text-cyan-300'
+                          }`}
+                        >
+                          {activeRoverState?.statusLabel ?? 'READY'}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        aria-label="Rover traverse mission elapsed time"
+                        min={0}
+                        max={maxRoverMetHours}
+                        step={0.02}
+                        value={Math.min(roverSimHours, maxRoverMetHours)}
+                        onChange={e => {
+                          const h = Number(e.target.value)
+                          setPlaying(false)
+                          setIsRoverPlaying(false)
+                          setRoverSimHours(h)
+                          if (samples.length > 0) {
+                            setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(h * 2))))
+                          }
+                        }}
+                        className="hud-range w-full"
+                      />
+                      {activeRoverState && (
+                        <div className="flex items-center justify-between text-[7px] font-mono-tech text-slate-400 tabular-nums">
+                          <span>☀ AZ {activeRoverState.sunAzimuthDeg.toFixed(1)}° · EL {activeRoverState.sunElevationDeg.toFixed(2)}°</span>
+                          <span>{activeRoverState.isRegenerating ? 'STATIONARY REGEN' : 'LUNAR REGOLITH TRANSIT'}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* MANUAL MODE BODY */}
                   {traverseMode === 'manual' && (
@@ -1768,6 +2055,19 @@ export function App() {
                                         {cand.los_to_base ? 'LOS OK' : 'NO LOS'}
                                       </span>
                                     </div>
+                                    <div className="flex items-center justify-between text-[7px] font-mono-tech mt-0.5 tabular-nums text-slate-400">
+                                      <span className="text-cyan-300">
+                                        +{(cand.drive_duration_hours ?? 0).toFixed(2)}h drive
+                                        {cand.effective_speed_mps ? ` @ ${cand.effective_speed_mps.toFixed(2)}m/s` : ''}
+                                      </span>
+                                      {(cand.regen_dwell_hours ?? 0) > 0 ? (
+                                        <span className="text-amber-300 font-semibold">
+                                          ⚡ +{(cand.regen_dwell_hours ?? 0).toFixed(2)}h Regen
+                                        </span>
+                                      ) : cand.sun_azimuth_deg !== undefined ? (
+                                        <span>☀ AZ {Math.round(cand.sun_azimuth_deg)}°</span>
+                                      ) : null}
+                                    </div>
                                     {!cand.is_valid && cand.rejection_reasons.length > 0 && (
                                       <div className="text-[8px] font-mono-tech text-rose-400 mt-0.5">
                                         {cand.rejection_reasons[0]}
@@ -1836,32 +2136,65 @@ export function App() {
                                     {Math.round(traverseAutoResult.summary.base_los_fraction * 100)}%
                                   </div>
                                 </div>
+                                <div>
+                                  <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Total MET</div>
+                                  <div className="text-[9px] font-mono-tech text-cyan-200 tabular-nums">
+                                    +{(traverseAutoResult.summary.total_traverse_hours ?? maxRoverMetHours).toFixed(1)}h
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Regen Holds</div>
+                                  <div className="text-[9px] font-mono-tech text-amber-300 tabular-nums">
+                                    {traverseAutoResult.summary.regen_stops_count ?? 0} (+{(traverseAutoResult.summary.total_regen_hours ?? 0).toFixed(1)}h)
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-[7px] font-mono-tech text-slate-500 uppercase">Final Bat</div>
+                                  <div className="text-[9px] font-mono-tech text-emerald-300 tabular-nums">
+                                    {Math.round(traverseAutoResult.summary.final_battery_wh)}Wh
+                                  </div>
+                                </div>
                               </div>
 
                               <div className="space-y-1 max-h-[155px] overflow-y-auto hud-scroll pr-0.5">
-                                {traverseAutoResult.waypoints.map(wp => (
-                                  <div
-                                    key={wp.waypoint_index}
-                                    className="flex items-center justify-between text-[8px] font-mono-tech rounded bg-white/[0.02] border border-white/[0.05] px-2 py-1 tabular-nums"
-                                  >
-                                    <span className="text-slate-300 truncate max-w-[92px]">
-                                      #{wp.waypoint_index} {wp.action === 'START_BASE_POD' ? 'BASE' : wp.action === 'ARRIVE_RESEARCH_TARGET' ? 'TARGET' : `WP ${wp.waypoint_index}`}
-                                    </span>
-                                    <span className="text-slate-400">
-                                      {wp.distance_to_target_m >= 1000
-                                        ? `${(wp.distance_to_target_m / 1000).toFixed(1)}km`
-                                        : `${Math.round(wp.distance_to_target_m)}m`}{' '}
-                                      rem
-                                    </span>
-                                    <span className={wp.slope_deg <= 8 ? 'text-emerald-400' : 'text-amber-300'}>
-                                      {wp.slope_deg.toFixed(1)}°
-                                    </span>
-                                    <span className="text-amber-300">{Math.round(wp.illumination_fraction * 100)}%☀</span>
-                                    <span className={wp.los_to_base ? 'text-emerald-400' : 'text-rose-400'}>
-                                      {wp.los_to_base ? 'LOS' : 'BLK'}
-                                    </span>
-                                  </div>
-                                ))}
+                                {traverseAutoResult.waypoints.map(wp => {
+                                  const wpMet = wp.met_hours ?? wp.arrival_met_hours ?? 0
+                                  const isActiveSeg = activeRoverState?.activeSegmentIndex === wp.waypoint_index
+                                  const hasRegen = (wp.regen_dwell_hours ?? 0) > 0
+                                  return (
+                                    <button
+                                      key={wp.waypoint_index}
+                                      type="button"
+                                      onClick={() => {
+                                        setPlaying(false)
+                                        setIsRoverPlaying(false)
+                                        setRoverSimHours(wpMet)
+                                        if (samples.length > 0) {
+                                          setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(wpMet * 2))))
+                                        }
+                                      }}
+                                      className={`w-full flex items-center justify-between text-[8px] font-mono-tech rounded border px-2 py-1 tabular-nums text-left transition ${
+                                        isActiveSeg
+                                          ? 'bg-cyan-400/15 border-cyan-400/50'
+                                          : 'bg-white/[0.02] border-white/[0.05] hover:bg-white/[0.06]'
+                                      }`}
+                                    >
+                                      <span className="text-slate-300 truncate max-w-[78px]">
+                                        #{wp.waypoint_index} {wp.action === 'START_BASE_POD' ? 'BASE' : wp.action === 'ARRIVE_RESEARCH_TARGET' ? 'TARGET' : hasRegen ? '⚡REGEN' : `WP ${wp.waypoint_index}`}
+                                      </span>
+                                      <span className="text-cyan-300">T+{wpMet.toFixed(1)}h</span>
+                                      <span className={wp.slope_deg <= 8 ? 'text-emerald-400' : 'text-amber-300'}>
+                                        {wp.slope_deg.toFixed(1)}°
+                                      </span>
+                                      <span className="text-amber-300">
+                                        {hasRegen ? `+${wp.regen_dwell_hours?.toFixed(1)}h` : `${Math.round(wp.illumination_fraction * 100)}%☀`}
+                                      </span>
+                                      <span className={wp.los_to_base ? 'text-emerald-400' : 'text-rose-400'}>
+                                        {wp.los_to_base ? 'LOS' : 'BLK'}
+                                      </span>
+                                    </button>
+                                  )
+                                })}
                               </div>
                             </>
                           )}
@@ -2165,7 +2498,7 @@ export function App() {
                 <div>
                   <div className="text-[8px] font-mono-tech tracking-[0.14em] text-slate-500 uppercase">Elev</div>
                   <div className="text-[11px] font-mono-tech text-slate-200 tabular-nums mt-0.5">
-                    {workspace.target.isCatalogSite ? `${workspace.target.elevation_m >= 0 ? '+' : ''}${Math.round(workspace.target.elevation_m).toLocaleString()} m` : 'Not sampled'}
+                    {`${workspace.target.elevation_m >= 0 ? '+' : ''}${Math.round(workspace.target.elevation_m).toLocaleString()} m`}
                   </div>
                 </div>
                 <div>
@@ -2389,8 +2722,14 @@ export function App() {
             step={1}
             value={sampleIndex}
             onChange={e => {
+              const nextIdx = Number(e.target.value)
               setPlaying(false)
-              setSampleIndex(Number(e.target.value))
+              setIsRoverPlaying(false)
+              setSampleIndex(nextIdx)
+              if (maxRoverMetHours > 0) {
+                const nextMet = samples[nextIdx]?.met_hours ?? nextIdx * 0.5
+                setRoverSimHours(Math.min(maxRoverMetHours, nextMet))
+              }
             }}
             aria-label="Mission elapsed timeline"
             className="hud-range flex-1 min-w-[90px]"

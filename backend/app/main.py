@@ -17,6 +17,7 @@ from backend.app.schemas.science import (
     DiffRequest,
     ExportFormat,
     ExportRequest,
+    PointEvaluateRequest,
     RecommendRequest,
     TraverseManualRequest,
     TraverseAutomaticRequest,
@@ -199,6 +200,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """Plan autonomous optimal multi-waypoint rover traverse to research destination."""
         response.headers["Cache-Control"] = "no-store"
         return service.run_traverse_automatic(payload)
+
+    @application.post("/api/point/evaluate", tags=["terrain"])
+    def evaluate_point(
+        payload: PointEvaluateRequest, response: Response
+    ) -> dict[str, Any]:
+        """Evaluate DEM elevation, slope, and 360-degree horizon profile at any coordinate."""
+        response.headers["Cache-Control"] = "no-store"
+        return service.run_point_evaluate(payload)
 
     return application
 

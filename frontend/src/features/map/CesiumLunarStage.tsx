@@ -7,6 +7,7 @@ import type {
   ContractRecommendDocument,
   Coordinates,
   DecodedDemSiteTerrain,
+  RoverPlaybackState,
   TraverseManualCandidate,
   TraverseResearchTargetOption,
   TraverseWaypoint,
@@ -35,6 +36,7 @@ interface Props {
   traverseTarget?: { latitude_deg: number; longitude_deg: number; elevation_m?: number; label?: string; shortLabel?: string } | null
   researchTargets?: TraverseResearchTargetOption[]
   pickingTraverseTarget?: boolean
+  activeRoverState?: RoverPlaybackState | null
   onSelectTraverseCandidate?: (candidate: TraverseManualCandidate) => void
   onPickTraverseTarget?: (coords: {
     latitude_deg: number
@@ -92,6 +94,18 @@ const MAPPED_RIM_MARKER_URI = svgDataUri(
   '<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">' +
     '<polygon points="11,3 19,11 11,19 3,11" fill="#141006" fill-opacity="0.72" stroke="#fbbf24" stroke-width="1.8"/>' +
     '<circle cx="11" cy="11" r="2" fill="#fbbf24"/>' +
+  '</svg>',
+)
+// Active Lunar Rover with solar wings & cyan beacon
+const ROVER_ICON_URI = svgDataUri(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">' +
+    '<rect x="2" y="12" width="7" height="8" rx="1" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>' +
+    '<rect x="23" y="12" width="7" height="8" rx="1" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>' +
+    '<rect x="10" y="9" width="12" height="14" rx="2.5" fill="#082f49" stroke="#22d3ee" stroke-width="2"/>' +
+    '<line x1="16" y1="4" x2="16" y2="9" stroke="#38bdf8" stroke-width="1.8"/>' +
+    '<circle cx="16" cy="4" r="2.2" fill="#22d3ee"/>' +
+    '<circle cx="12" cy="24" r="2" fill="#e2e8f0"/>' +
+    '<circle cx="20" cy="24" r="2" fill="#e2e8f0"/>' +
   '</svg>',
 )
 function position(lon: number, lat: number, height=0) { return C.Cartesian3.fromDegrees(lon,lat,height,MOON) }
@@ -247,10 +261,22 @@ export function CesiumLunarStage(props: Props) {
           latest.current.onPickTraverseTarget?.({latitude_deg:lat,longitude_deg:lon,elevation_m:sampled.insidePatch?sampled.elevationM:cart.height})
           return
         }
-        if(runtime.current?.local){setMessage('Terrain inspection is fixed to the local DEM patch; use Pick Target for rover destination or Orbital view.');return}
-        const picked=viewer.camera.pickEllipsoid(event.position,MOON);if(!picked)return
+        let picked:C.Cartesian3|undefined
+        if(runtime.current?.local&&viewer.scene.pickPositionSupported){picked=viewer.scene.pickPosition(event.position)}
+        if(!picked) picked=viewer.camera.pickEllipsoid(event.position,MOON)
+        if(!picked) return
         const cart=MOON.cartesianToCartographic(picked)
-        latest.current.onPickPoint({latitude_deg:C.Math.toDegrees(cart.latitude),longitude_deg:C.Math.toDegrees(cart.longitude),elevation_m:0,slope_deg:null,matchedCatalogSite:null,label:'Coordinate inspection · elevation not sampled',horizonAnglesDeg:[]})
+        const lat=C.Math.toDegrees(cart.latitude),lon=C.Math.toDegrees(cart.longitude)
+        const sampled=sampleDemAtLatLon(latest.current.demTerrain,lat,lon)
+        latest.current.onPickPoint({
+          latitude_deg:lat,
+          longitude_deg:lon,
+          elevation_m:Number(sampled.elevationM.toFixed(1)),
+          slope_deg:Number(sampled.slopeDeg.toFixed(1)),
+          matchedCatalogSite:null,
+          label:sampled.insidePatch?'Local LOLA DEM Surface Point':'South Polar Coordinate',
+          horizonAnglesDeg:[],
+        })
       },C.ScreenSpaceEventType.LEFT_CLICK)
       const renderError=()=>{if(alive)setError('The 3D viewer stopped rendering. Reload to retry; the dashboard analysis remains available.')}
       viewer.scene.renderError.addEventListener(renderError)
@@ -399,12 +425,38 @@ export function CesiumLunarStage(props: Props) {
       }
       for(const wp of waypoints){
         if(wp.waypoint_index===0||wp.action==='ARRIVE_RESEARCH_TARGET') continue
+        const isRegenStop=(wp.regen_dwell_hours??0)>0
         rt.traverse.push(rt.viewer.entities.add({
           id:`traverse-wp:${wp.waypoint_index}`,
           position:terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,wpOffset),
-          point:{pixelSize:7,color:wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+          point:{
+            pixelSize:isRegenStop?9.5:7,
+            color:isRegenStop?C.Color.fromCssColorString('#f59e0b'):wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),
+            outlineColor:isRegenStop?C.Color.fromCssColorString('#fde68a'):C.Color.BLACK,
+            outlineWidth:isRegenStop?2:1.5,
+            disableDepthTestDistance:Number.POSITIVE_INFINITY,
+          },
         }))
       }
+    }
+
+    if(props.activeRoverState){
+      const rover=props.activeRoverState
+      rt.traverse.push(rt.viewer.entities.add({
+        id:'active-rover',
+        position:terrainPosition(rover.latitudeDeg,rover.longitudeDeg,rover.elevationM,demOrigin,scale,wpOffset+4),
+        billboard:{image:ROVER_ICON_URI,width:28,height:28,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        label:{
+          text:`ROVER · T+${rover.metHours.toFixed(1)}h${rover.isRegenerating?' ⚡ REGEN':''}`,
+          font:'600 9px "JetBrains Mono", monospace',
+          fillColor:rover.isRegenerating?C.Color.fromCssColorString('#fde047'):C.Color.fromCssColorString('#22d3ee'),
+          outlineColor:C.Color.BLACK,
+          outlineWidth:3,
+          style:C.LabelStyle.FILL_AND_OUTLINE,
+          pixelOffset:new C.Cartesian2(0,-22),
+          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+        },
+      }))
     }
 
     const candidates=props.traverseCandidates??[]
@@ -432,7 +484,7 @@ export function CesiumLunarStage(props: Props) {
       }
     }
     rt.viewer.scene.requestRender()
-  },[ready,props.traverseTarget,props.researchTargets,props.catalogSites,props.traverseWaypoints,props.traverseCandidates,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
+  },[ready,props.traverseTarget,props.researchTargets,props.catalogSites,props.traverseWaypoints,props.traverseCandidates,props.activeRoverState,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
 
   return <div className="absolute inset-0" aria-label="Cesium lunar imagery and verified terrain">
     <div ref={host} className="absolute inset-0"/>

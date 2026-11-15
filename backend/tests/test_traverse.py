@@ -13,9 +13,12 @@ from backend.terrain.traverse import (
     check_surface_los,
     estimate_solar_illumination,
     compute_leg_power,
+    compute_step_kinematics_and_power,
+    evaluate_surface_point,
     suggest_next_waypoints,
     plan_automatic_traverse,
     DEFAULT_BATTERY_CAPACITY_WH,
+    REGEN_TARGET_BATTERY_WH,
 )
 
 DEM_TIF_PATH = Path("data/raw/LDEM_80S_80MPP_ADJ.TIF")
@@ -259,6 +262,106 @@ def test_variable_length_stepping_and_exact_target_snap(real_dem_reader):
     top = snap_res["candidates"][0]
     assert top["distance_to_target_m"] == 0.0
     assert abs(top["step_distance_m"] - 320.0) < 5.0
+
+
+def test_compute_step_kinematics_solar_regen_hold():
+    # Steep 8 deg leg starting below REGEN_TRIGGER_BATTERY_WH (580 Wh) must trigger a stationary regen hold
+    kin = compute_step_kinematics_and_power(
+        distance_m=450.0,
+        slope_deg=8.0,
+        illumination_fraction=0.9,
+        current_battery_wh=560.0,
+        current_met_hours=1.5,
+    )
+    assert 0.175 <= kin["effective_speed_mps"] < 0.5
+    assert kin["drive_duration_hours"] > 0.25
+    assert kin["regen_dwell_hours"] > 0.0
+    assert kin["regen_energy_wh"] > 0.0
+    assert kin["new_battery_wh"] == REGEN_TARGET_BATTERY_WH
+    assert kin["arrival_met_hours"] > 1.5
+    assert kin["departure_met_hours"] > kin["arrival_met_hours"]
+
+
+def test_traverse_met_hours_and_sun_propagation(real_dem_reader):
+    plan = plan_automatic_traverse(
+        reader=real_dem_reader,
+        start_lat=-89.463158,
+        start_lon=-137.501985,
+        target_lat=-89.90,
+        target_lon=0.0,
+        initial_battery_wh=620.0,
+        step_m=2500.0,
+        max_steps=20,
+        sun_azimuth_deg=180.0,
+        sun_elevation_deg=1.0,
+        start_met_hours=0.0,
+    )
+    wps = plan["waypoints"]
+    assert wps[0]["met_hours"] == 0.0
+    assert wps[0]["arrival_met_hours"] == 0.0
+    for idx in range(1, len(wps)):
+        assert wps[idx]["arrival_met_hours"] > wps[idx - 1]["met_hours"]
+        assert wps[idx]["met_hours"] >= wps[idx]["arrival_met_hours"]
+        assert "sun_azimuth_deg" in wps[idx]
+    assert plan["summary"]["total_traverse_hours"] > 0.0
+    assert "total_regen_hours" in plan["summary"]
+    assert "regen_stops_count" in plan["summary"]
+    assert plan["summary"]["regen_stops_count"] >= 1
+
+
+def test_los_enforcement_manual_candidates(real_dem_reader):
+    res = suggest_next_waypoints(
+        reader=real_dem_reader,
+        current_lat=-89.465,
+        current_lon=-137.86,
+        target_lat=-89.472,
+        target_lon=-137.84,
+        base_lat=-89.465,
+        base_lon=-137.86,
+        current_battery_wh=1000.0,
+        step_distance_m=300.0,
+        num_candidates=8,
+        current_met_hours=0.0,
+    )
+    valid = [c for c in res["candidates"] if c["is_valid"]]
+    assert valid
+    assert all(c["los_to_base"] for c in valid)
+
+
+def test_point_evaluate_and_api_endpoint(real_dem_reader):
+    from fastapi.testclient import TestClient
+    from backend.app.main import create_app
+
+    pt = evaluate_surface_point(
+        reader=real_dem_reader,
+        lat_deg=-89.463158,
+        lon_deg=-137.501985,
+        observer_height_m=2.0,
+    )
+    assert pt["in_dem_coverage"] is True
+    assert isinstance(pt["elevation_m"], float)
+    assert isinstance(pt["slope_deg"], float)
+    assert len(pt["horizon_angles"]) == 360
+
+    app = create_app()
+    client = TestClient(app)
+
+    resp_in = client.post(
+        "/api/point/evaluate",
+        json={"latitude_deg": -89.463158, "longitude_deg": -137.501985, "observer_height_m": 2.0},
+    )
+    assert resp_in.status_code == 200
+    body_in = resp_in.json()
+    assert body_in["in_dem_coverage"] is True
+    assert len(body_in["horizon_angles"]) == 360
+
+    resp_out = client.post(
+        "/api/point/evaluate",
+        json={"latitude_deg": 0.0, "longitude_deg": 0.0, "observer_height_m": 2.0},
+    )
+    assert resp_out.status_code == 200
+    assert resp_out.json()["in_dem_coverage"] is False
+
 
 
 
