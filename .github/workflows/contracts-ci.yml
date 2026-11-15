@@ -35,3 +35,9 @@ jobs:
       - run: npm --prefix frontend ci
       - run: npm --prefix frontend test
       - run: npm --prefix frontend run build
+      - run: npm --prefix frontend run verify:delivery
+      - uses: actions/upload-artifact@v4
+        with:
+          name: horizon-ops-static-demo
+          path: frontend/dist/
+          retention-days: 7

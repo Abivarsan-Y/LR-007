@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import vm from 'node:vm';
+import { offsetCoordinate } from '../src/features/map/lunar.mjs';
 const dist=new URL('../dist/',import.meta.url);
 const json=async path=>JSON.parse(await readFile(new URL(path,dist)));
 const sources=await json('imagery/sources.json');
@@ -11,6 +12,13 @@ for(const image of sources.images){
 }
 const terrain=JSON.parse(await readFile(new URL('../../data/processed/site01_connecting_ridge_terrain.json',import.meta.url)));
 assert.equal(sources.terrain_sha256,terrain.sha256,'Cached local image must correspond to the current terrain crop');
+const points=[];
+for(let row=0;row<terrain.height;row++)for(let col=0;col<terrain.width;col++)points.push(offsetCoordinate(terrain.coordinates.latitude_deg,terrain.coordinates.longitude_deg,(col-(terrain.width-1)/2)*terrain.spacing_m,((terrain.height-1)/2-row)*terrain.spacing_m));
+const bounds=[Math.min(...points.map(p=>p.lon)),Math.min(...points.map(p=>p.lat)),Math.max(...points.map(p=>p.lon)),Math.max(...points.map(p=>p.lat))];
+const local=sources.images.find(image=>image.file==='lroc-site01.jpg');
+assert.ok(local,'Bundled Site01 image required');
+bounds.forEach((value,i)=>assert.ok(Math.abs(value-local.bounds[i])<1e-10,'Cached imagery bounds must cover the current terrain geometry'));
+
 const listeners={},stores=new Map([['unrelated-cache',new Map()],['horizon-ops-old',new Map()]]);
 const caches={
   keys:async()=>[...stores.keys()], delete:async key=>stores.delete(key),

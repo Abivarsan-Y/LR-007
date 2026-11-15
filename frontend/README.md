@@ -11,7 +11,7 @@ npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open the URL printed by Vite. The dashboard can read its bundled science fixtures without a Python server; lunar imagery requires internet access. No Cesium ion token is needed.
+Open the URL printed by Vite. The dashboard can read its bundled science fixtures without a Python server; default lunar imagery is bundled; optional live tiles require internet access. No Cesium ion token is needed.
 
 ```sh
 npm --prefix frontend test
@@ -22,12 +22,12 @@ Vite copies the installed Cesium Assets, Widgets, Workers and ThirdParty directo
 
 ## Real data and boundaries
 
-- The global Moon is a 1,737,400 m reference sphere with real LROC WAC imagery streamed from [Lunaserv](https://wms.im-ldi.com/), layer `luna_wac_global`, WMS 1.1.1, `IAU2000:30100`. Global elevation tiles are not connected.
+- The global Moon is a 1,737,400 m reference sphere with bundled real LROC WAC imagery and optional live tiles from [Lunaserv](https://wms.im-ldi.com/), layer `luna_wac_global`, WMS 1.1.1, `IAU2000:30100`. Global elevation tiles are not connected.
 - Connecting Ridge (Site 01) has a verified 129 × 129 LOLA elevation crop, 20 m spacing, and recorded JPL Horizons analysis at the canonical MOON_ME_DE421 observer and 2 m mast. Select it through search, then choose OBLIQUE or HORIZON to inspect the local terrain. The global globe is hidden in this local view so it cannot cover negative terrain heights.
 - Local offsets are mapped onto the lunar sphere using spherical forward geodesics. Heights use the declared reference radius and canonical observer elevation. Vertical exaggeration changes only the display, never the stored science values.
 - Sun/Earth vectors require matching coordinates, frame, radius, elevation, observer height and real-data provenance. They retain negative elevations. The timeline selects recorded samples; the renderer does not compute ephemerides or terrain shadows. Imagery contains acquisition-time lighting.
 - Only the 2 m observer has verified recorded Site01 results, so its 5 m toggle is disabled. Arbitrary coordinates are inspection only: elevation is not sampled, analysis is unknown, vectors are hidden and exports disabled. Other catalog previews do not gain verified local relief from this integration.
-- An imagery failure is reported; no procedural Moon is substituted. The old main procedural renderer has been removed. Legacy independent scene previews are separate from this main view.
+- A live imagery failure falls back to the bundled real LROC mosaic; no procedural Moon is substituted. The old main procedural renderer has been removed. Legacy independent scene previews are separate from this main view.
 
 ## State flow
 
@@ -38,3 +38,5 @@ Vite copies the installed Cesium Assets, Widgets, Workers and ThirdParty directo
 The frontend tests cover existing contracts/terrain decoding plus lunar coordinate conversion, WMS requests, ENU directions and observer matching. Browser checks exercised the loaded imagery, verified Site01 selection, local relief and slope overlay, and unknown analysis at an arbitrary coordinate. This does not validate landing safety or new ephemeris computations.
 
 Inherited recommendation/safe-haven UI and the separate 2D view remain work owned by their existing producers; their labels do not certify a site. Global DEM streaming, scientific shadows, bundle splitting and additional verified observers are follow-ups.
+
+See [delivery status](../docs/delivery.md) for offline modes, deployment configuration and remaining scientific/release tasks.
