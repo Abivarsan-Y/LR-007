@@ -13,8 +13,9 @@
 | **2. Challenge / Problem Statement** | **NASA Space Apps Challenge — Lunar Landing Site Navigator** *(adaptable if submitting to a regional/national portal: `[ADD_LOCAL_CHALLENGE_TITLE_IF_APPLICABLE]`)* |
 | **3. Project Name** | **HORIZON OPS** — *Lunar Landing Site, Mission Window, LunaDiff & Rover Traverse Navigator* |
 | **4. Target Audience** | Built in **Sri Lanka** for the **world** — lunar mission planners, planetary scientists, aerospace researchers, and university/STEM students |
-| **5. Source Repository** | [github.com/Abivarsan-Y/LR-007](https://github.com/Abivarsan-Y/LR-007) |
-| **6. Demo Links** | Live App: `[ADD_LIVE_APP_URL]` · Video: `[ADD_DEMO_VIDEO_URL]` · Slides: `[ADD_SLIDES_URL]` |
+| **5. AI Tools Used** | **Yes** — ChatGPT, OpenAI Codex, and Google Antigravity (development & documentation; deterministic physics at runtime) |
+| **6. Source Repository** | [github.com/Abivarsan-Y/LR-007](https://github.com/Abivarsan-Y/LR-007) |
+| **7. Demo Links** | Live App: `[ADD_LIVE_APP_URL]` · Video: `[ADD_DEMO_VIDEO_URL]` · Slides: `[ADD_SLIDES_URL]` |
 
 ---
 
@@ -235,15 +236,17 @@ Yes — the following engineering catalogs, partner portals, and verification fi
 
 ## 11. Did You Use AI Tools? (`ChatGPT, Cursor, Copilot, etc.`)
 
-**Yes — transparently and strictly for development productivity, not scientific inference.**
+**Yes — transparently used across the team for both software development and documentation preparation, not runtime scientific inference.**
 
-* **Where AI Coding Assistants Were Used:**  
-  AI assistants (such as **Antigravity / LLM coding assistants**) were used during development to accelerate React/TypeScript UI component scaffolding, CesiumJS tactical overlay styling/SVG icons, boilerplate FastAPI endpoint wiring, unit test authoring, and organizing technical documentation.
+* **AI Tools Used by the Team:** **ChatGPT**, **OpenAI Codex**, and **Google Antigravity** (AI coding & documentation assistants).
+* **How AI Was Used in Development & Documentation:**
+  * **Software Development (Teammates & Integration):** Assisted with code prototyping, React/TypeScript UI components, CesiumJS tactical overlays and SVG icons, FastAPI endpoint wiring, algorithm structuring, debugging, and writing automated unit/integration tests.
+  * **Documentation & Submission Preparation:** Assisted in drafting, organizing, and formatting repository documentation, technical explanations, and hackathon submission materials (`docs/`).
 * **What Was NOT Delegated to AI:**  
-  No generative AI or LLM runs inside the physics, ephemeris, or planning loops. All planetary math (polar stereographic projection, spherical curvature drop, 360° horizon ray-casting, circular-segment solar penumbra integration, LunaDiff differential logic, and slope/battery/LOS traverse planning) is implemented as deterministic Python and TypeScript algorithms and validated against analytical formulas and **176 automated tests** (`145` backend + `8` schema contract + `23` frontend tests).
+  No generative AI or LLM runs inside the physics, ephemeris, or mission-planning runtime loops. All planetary math (polar stereographic projection, spherical curvature drop, 360° horizon ray-casting, circular-segment solar penumbra integration, LunaDiff differential logic, and slope/battery/LOS traverse planning) executes through deterministic Python and TypeScript algorithms verified by closed-form analytical benchmarks and **176 automated tests** (`145` backend + `8` schema contract + `23` frontend tests).
 
 **Copy-Paste AI Disclosure Statement (Short Portal Version):**
-> *"Generative AI coding assistants were used during development to assist with UI scaffolding, boilerplate API integration, unit test authoring, and documentation formatting. Zero AI models are used at runtime to generate scientific estimates: all elevation ingestion, lunar spherical curvature equations, JPL Horizons ephemeris replay, solar penumbra visibility calculations, LunaDiff comparisons, and rover traverse pathfinding execute through deterministic physics/geometric code validated by 176 automated tests and NASA source provenance hashes."*
+> *"Team LR-007 used ChatGPT, OpenAI Codex, and Google Antigravity as development and documentation assistants for code scaffolding, UI/API integration, debugging, automated test authoring, and organizing project documentation. Zero generative AI models run at execution time to infer scientific results: all NASA LOLA elevation sampling, lunar spherical curvature equations, JPL Horizons ephemeris replay, solar penumbra calculations, LunaDiff comparisons, and rover traverse planning execute via deterministic geometric and physical algorithms verified by 176 automated tests and NASA source provenance checksums."*
 
 ---
 
