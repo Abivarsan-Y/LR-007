@@ -1,0 +1,38 @@
+{
+  "retrieved_utc": "2026-11-15T05:48:44.218Z",
+  "credit": "NASA / GSFC / Arizona State University · LROC WAC via Lunaserv",
+  "layer": "luna_wac_global",
+  "crs": "IAU2000:30100",
+  "note": "Imagery only; acquisition lighting is baked into the mosaic. Not a DEM or computed mission shadow map.",
+  "terrain_sha256": "ea3bc4681473ca7229dd65e56f45f4d80d10c3288a4a1815f6de47287da6d062",
+  "images": [
+    {
+      "file": "lroc-global.jpg",
+      "url": "https://wms.im-ldi.com/?service=WMS&version=1.1.1&request=GetMap&layers=luna_wac_global&styles=&srs=IAU2000%3A30100&bbox=-180%2C-90%2C180%2C90&width=2048&height=1024&format=image%2Fjpeg",
+      "bounds": [
+        -180,
+        -90,
+        180,
+        90
+      ],
+      "width": 2048,
+      "height": 1024,
+      "sha256": "f37500c59b7928623156041da3aca0d891b75b3469b2cfff38fe0df18844f7cc",
+      "bytes": 1042625
+    },
+    {
+      "file": "lroc-site01.jpg",
+      "url": "https://wms.im-ldi.com/?service=WMS&version=1.1.1&request=GetMap&layers=luna_wac_global&styles=&srs=IAU2000%3A30100&bbox=-142.37984009270792%2C-89.50536945132932%2C-132.6241297225382%2C-89.4194095786195&width=1024&height=1024&format=image%2Fjpeg",
+      "bounds": [
+        -142.37984009270792,
+        -89.50536945132932,
+        -132.6241297225382,
+        -89.4194095786195
+      ],
+      "width": 1024,
+      "height": 1024,
+      "sha256": "2901602f14dee567974543e66ec4c12ecd99e23d49c87f3029954624a356917c",
+      "bytes": 20563
+    }
+  ]
+}

@@ -111,6 +111,7 @@ export function App() {
   const [surfacePreset, setSurfacePreset] = useState<SurfaceCameraPreset>('OBLIQUE')
   const [cameraPresetNonce, setCameraPresetNonce] = useState(0)
   const [focusCoords, setFocusCoords] = useState<{ latitude_deg: number; longitude_deg: number } | null>(null)
+  const [streamLiveImagery,setStreamLiveImagery] = useState(false)
   const [useNasaTrekImagery, setUseNasaTrekImagery] = useState(true)
   const [nasaImageryStatus, setNasaImageryStatus] = useState<'loading' | 'loaded' | 'offline'>('loading')
 
@@ -453,6 +454,7 @@ export function App() {
         desiredCameraMode={desiredCameraMode}
         surfacePreset={surfacePreset}
         useNasaTrekImagery={useNasaTrekImagery}
+        streamLiveImagery={streamLiveImagery}
         cameraPresetNonce={cameraPresetNonce}
         demTerrain={workspace?.demTerrain ?? null}
         currentSample={currentSample}
@@ -1002,6 +1004,9 @@ export function App() {
                         ? 'LOADING…'
                         : 'FALLBACK'}
                 </span>
+              </button>
+              <button type="button" aria-pressed={streamLiveImagery} onClick={()=>setStreamLiveImagery(value=>!value)} className="w-full text-left text-[9px] text-slate-400 px-2.5 py-1.5 rounded-lg border border-white/10">
+                {streamLiveImagery?'LIVE TILES ON · INTERNET REQUIRED':'BUNDLED REAL IMAGERY · NO INTERNET REQUIRED'}
               </button>
             </section>
 

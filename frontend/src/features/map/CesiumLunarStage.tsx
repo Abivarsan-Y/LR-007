@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as C from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import type { AnalysisSample, CatalogSiteEntry, ContractRecommendDocument, Coordinates, DecodedDemSiteTerrain } from '../../api/types'
-import { RADIUS, WMS_URL, offsetCoordinate, directionEnu, mapImageUrl, observerMatches, isCanonicalTerrain } from './lunar.mjs'
+import { RADIUS, WMS_URL, offsetCoordinate, directionEnu, observerMatches, isCanonicalTerrain } from './lunar.mjs'
 import canonical from '../../../../backend/tests/fixtures/science/site01/site.json'
 
 export type TerrainOverlayMode = 'albedo' | 'slope'
@@ -15,7 +15,7 @@ interface Props {
   catalogSites: CatalogSiteEntry[]; selectedSiteId: string | null
   focusCoordinates: { latitude_deg: number; longitude_deg: number } | null
   hasSelection: boolean; desiredCameraMode: 'ORBITAL' | 'SURFACE'
-  surfacePreset?: SurfaceCameraPreset; useNasaTrekImagery?: boolean; cameraPresetNonce: number
+  surfacePreset?: SurfaceCameraPreset; useNasaTrekImagery?: boolean; streamLiveImagery?: boolean; cameraPresetNonce: number
   demTerrain: DecodedDemSiteTerrain | null; currentSample: AnalysisSample | null
   analysisCoordinates: Coordinates | null; analysisObserverHeightM: number | null; analysisDataKind: string | null
   recommendations: ContractRecommendDocument | null; highlightedCandidateId: string | null
@@ -62,7 +62,7 @@ function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope
   }),indices,primitiveType:C.PrimitiveType.TRIANGLES,boundingSphere:C.BoundingSphere.fromVertices(vertices)})
   rt.bounds=geometry.boundingSphere ?? null
   rt.patchCentre=position(origin.longitude_deg,origin.latitude_deg,origin.elevation_m)
-  rt.imageMaterial=C.Material.fromType('Image',{image:mapImageUrl([west,south,east,north])})
+  rt.imageMaterial=C.Material.fromType('Image',{image:`${import.meta.env.BASE_URL}imagery/lroc-site01.jpg`})
   const appearance=slope?new C.PerInstanceColorAppearance({flat:true,translucent:false,closed:false}):new C.MaterialAppearance({material:rt.imageMaterial,flat:true,faceForward:true,translucent:false})
   rt.patch=rt.viewer.scene.primitives.add(new C.Primitive({geometryInstances:new C.GeometryInstance({geometry}),appearance,asynchronous:false}))
   const valid=new Set(indices),wire=new C.PolylineCollection()
@@ -98,14 +98,19 @@ export function CesiumLunarStage(props: Props) {
       viewer.scene.globe.showGroundAtmosphere=false;viewer.scene.globe.enableLighting=false
       viewer.scene.backgroundColor=C.Color.fromCssColorString('#050507')
       const provider=new C.WebMapServiceImageryProvider({url:WMS_URL,layers:'luna_wac_global',parameters:{version:'1.1.1',srs:'IAU2000:30100',format:'image/jpeg',transparent:false},tilingScheme:new C.GeographicTilingScheme({ellipsoid:MOON}),maximumLevel:10,enablePickFeatures:false,credit:'NASA / GSFC / ASU · LROC WAC via Lunaserv'})
-      viewer.imageryLayers.addImageryProvider(provider)
+      // Checked-in real mosaic remains underneath streamed tiles, including offline.
+      const baseline=new C.SingleTileImageryProvider({url:`${import.meta.env.BASE_URL}imagery/lroc-global.jpg`,tileWidth:2048,tileHeight:1024,rectangle:C.Rectangle.MAX_VALUE,ellipsoid:MOON,credit:'NASA / GSFC / ASU · cached LROC WAC via Lunaserv'})
+      viewer.imageryLayers.addImageryProvider(baseline)
+      const liveLayer=viewer.imageryLayers.addImageryProvider(provider)
+      liveLayer.show=false
       rt={viewer,provider,patch:null,wire:null,imageMaterial:null,bounds:null,local:false,rays:[],target:null,catalog:[],patchCentre:null}
       runtime.current=rt
-      latest.current.onNasaImageryStatusChange?.('loading')
-      provider.errorEvent.addEventListener(()=>{if(!alive)return;failed=true;setMessage('LROC imagery unavailable. No synthetic image is substituted.');latest.current.onNasaImageryStatusChange?.('offline')})
+      latest.current.onNasaImageryStatusChange?.('loaded')
+      setMessage('Bundled real LROC WAC mosaic · live tiles off. Relief only at the verified Site01 patch.')
+      provider.errorEvent.addEventListener(()=>{if(!alive)return;failed=true;setMessage('Bundled LROC WAC mosaic · live tiles unavailable; local Site01 imagery remains available.');latest.current.onNasaImageryStatusChange?.('offline')})
       viewer.scene.globe.tileLoadProgressEvent.addEventListener(pending=>{
         if(!alive||failed)return
-        if(pending===0){setMessage('LROC WAC imagery · Lunar sphere; relief only at the verified Site01 patch.');latest.current.onNasaImageryStatusChange?.('loaded')}
+        if(pending===0&&latest.current.streamLiveImagery){setMessage('LROC WAC live tiles · Lunar sphere; relief only at the verified Site01 patch.');latest.current.onNasaImageryStatusChange?.('loaded')}
       })
       viewer.camera.setView({destination:position(0,-15,RADIUS*3)})
       for(const site of latest.current.catalogSites){
@@ -171,7 +176,8 @@ export function CesiumLunarStage(props: Props) {
     const rt=runtime.current;if(!rt)return
     if(rt.wire)rt.wire.show=rt.local&&props.showWireframe
     const imagery=props.useNasaTrekImagery!==false
-    if(rt.viewer.imageryLayers.length)rt.viewer.imageryLayers.get(0).show=imagery
+    for(let i=0;i<rt.viewer.imageryLayers.length;i++)rt.viewer.imageryLayers.get(i).show=imagery&&(i===0||props.streamLiveImagery===true)
+    if(!props.streamLiveImagery){setMessage('Bundled real LROC WAC mosaic · live tiles off. Relief only at the verified Site01 patch.');props.onNasaImageryStatusChange?.('loaded')}
     if(rt.patch&&props.overlayMode!=='slope'&&rt.imageMaterial){
       rt.patch.appearance.material=imagery?rt.imageMaterial:C.Material.fromType('Color',{color:C.Color.fromCssColorString('#344452')})
     }
@@ -196,7 +202,7 @@ export function CesiumLunarStage(props: Props) {
       }
     }
     rt.viewer.scene.requestRender()
-  },[ready,matching,props.currentSample,props.showWireframe,props.useNasaTrekImagery,props.overlayMode,props.verticalScale,props.focusCoordinates,props.observerHeightM,props.desiredCameraMode,props.demTerrain])
+  },[ready,matching,props.currentSample,props.showWireframe,props.useNasaTrekImagery,props.streamLiveImagery,props.overlayMode,props.verticalScale,props.focusCoordinates,props.observerHeightM,props.desiredCameraMode,props.demTerrain])
 
   return <div className="absolute inset-0" aria-label="Cesium lunar imagery and verified terrain">
     <div ref={host} className="absolute inset-0"/>

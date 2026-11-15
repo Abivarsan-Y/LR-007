@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/build-offline.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "test": "node --test src/scene/directions.test.mjs src/scene/terrain.test.mjs src/scene/terrain-json.test.mjs src/features/map/lunar.test.mjs"
+    "test": "node --test src/scene/directions.test.mjs src/scene/terrain.test.mjs src/scene/terrain-json.test.mjs src/features/map/lunar.test.mjs",
+    "cache:imagery": "node scripts/cache-lunar-imagery.mjs",
+    "verify:delivery": "node scripts/verify-delivery.mjs"
   },
   "dependencies": {
     "@react-three/fiber": "^9.4.0",
