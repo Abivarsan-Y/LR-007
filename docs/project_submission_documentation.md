@@ -115,7 +115,6 @@
    Download the verified mission analysis and route timeline as **JSON** or **CSV** with embedded SHA-256 provenance metadata.
 
 ### B. Technical Pipeline Architecture (Under the Hood)
-
 ```mermaid
 flowchart TD
     subgraph NASA["1. Authentic NASA Sources & Offline Cache"]
