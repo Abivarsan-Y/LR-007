@@ -1,43 +1,95 @@
-# HORIZON OPS — LR-007
+# HORIZON OPS (`LR-007`)
 
-Lunar Landing Site, Mission Window & LunaDiff Navigator. Scope follows [the master plan](notes/master_plan.md).
+**Lunar South Pole Landing Site, Mission Window, LunaDiff & Rover Traverse Navigator**  
+*2026 NASA Space Apps Challenge Submission — Team LR-007*
 
-## Current implementation
+---
 
-- A: FastAPI health endpoint and a Horizons ephemeris client with verified real-response cache replay; analysis endpoints are not wired yet.
-- B: terrain ingestion and four JSON grid exports. Their orientation, height-reference metadata and site-elevation agreement need validation before scientific combination.
-- C/D: mission dashboard with embedded React Three Fiber terrain scene, camera controls, site-grid switching and a separate synthetic direction timeline.
-- D: draft shared JSON contracts, synthetic fixtures, loaders, validation tests and CI.
+## Project Demo & Submission Resources
 
-The default dashboard displays exported terrain for **unverified inspection only**, with neutral lighting and celestial overlays hidden. A separate synthetic mode drives the Sun/Earth markers with three explicit fixture samples. Telemetry remains synthetic and static. No terrain-aware visibility, certified landing safety, real scenario comparison or scientific shadow result is produced by this integration.
+- **7-Slide Project Demo Deck (PDF):** [`docs/presentation/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/presentation/HORIZON_OPS_7_Slide_Demo.pdf) (public link: `https://github.com/Abivarsan-Y/LR-007/blob/main/docs/presentation/HORIZON_OPS_7_Slide_Demo.pdf`)
+- **Interactive Browser Slides (HTML) & Speaker Notes (Markdown):** [`docs/presentation/HORIZON_OPS_7_Slide_Demo.html`](./docs/presentation/HORIZON_OPS_7_Slide_Demo.html) · [`docs/presentation/HORIZON_OPS_7_Slide_Demo.md`](./docs/presentation/HORIZON_OPS_7_Slide_Demo.md)
+- **Space Apps Submission Copy-Paste Pack:** [`docs/NASA_SPACE_APPS_SUBMISSION_PACK.md`](./docs/NASA_SPACE_APPS_SUBMISSION_PACK.md)
+- **Full Technical & Architecture Reference:** [`docs/project_submission_documentation.md`](./docs/project_submission_documentation.md) · [`docs/DOCUMENTATION_GUIDE.md`](./docs/DOCUMENTATION_GUIDE.md)
 
-## Run the dashboard
+---
 
-Requires Node 24 and npm. From the repo root:
+## What HORIZON OPS Does
 
-```sh
+1. **Interactive 3D Lunar South Pole Globe + Synchronized 2D Polar Map (`80°S–90°S`)**
+   - CesiumJS 3D South Polar visualization textured with **NASA LRO WAC (`luna_wac_global`)** via Lunaserv WMS, far-field 3D starfield, and seamless `129 × 129` (`20 m` spacing) **NASA LOLA DEM** terrain relief across four Artemis-era South Pole sites (`Connecting Ridge`, `Shackleton Rim`, `Malapert Mountain`, `Haworth Interior`) with camera elevation floor protection.
+2. **Artemis Slope Hazard Screening & Nearby Safe Haven Recommender**
+   - Evaluates local landing slopes using **SAFE (`< 8.0°`)**, **CAUTION (`8.0°–15.0°`)**, and **HAZARD (`> 15.0°`)** thresholds with switchable shaders.
+   - Scans concentric rings around unsafe points to recommend safer ridge flats (e.g., Connecting Ridge `Site 01`: `SH-1: 0.44°`, `SH-2: 2.61°`, `SH-3: 1.36°`).
+3. **LunaDiff Engine (*"See What Changed. See Why."*) & Causal 360° Horizon Inspector**
+   - Compares a Nominal launch window (`Nov 15, 2026`, `14` days) against launch delays (`+24h` / `+48h` / `+72h`) at `30-minute` cadence using curvature-adjusted 360° horizon ray-casting (`1,440` rays at `0.25°` spacing out to `150 km`, lunar radius $R = 1,737,400\,\text{m}$) and **NASA JPL Horizons `DE421`** (`MOON_ME_DE421`) Sun and Earth ephemerides.
+   - Example verified Connecting Ridge (`Site 01`) `+48h` delay shift: **`-46.2 h` net sunlight**, **`+10.0 h` net Earth visibility**, linked directly to obstructing crater rim azimuths (e.g., `MET +216.0h`, `118.293°` SE rim at `1.534°` blocking the `1.255°` Sun).
+4. **Energy- & LOS-Constrained Rover Traverse Planner (Manual & Automatic Modes)**
+   - Plans sorties from a landed Base Pod toward Permanently Shadowed Regions (PSRs) enforcing `≤ 15°` slope limits, `1,200 Wh` battery (`20%` safety floor), `150 W` drive draw, `350 W` peak solar charging, `0.5 m/s` cruise speed, dynamic synodic solar rotation (`+0.508°/h`), return-to-haven margin, and curvature-aware **`5 m` Base Pod mast to `2 m` rover mast** radio line-of-sight (LOS).
+   - Verified real **LOLA `LDEM_80S_80MPP_ADJ.TIF`** sortie result: `1,091.9 m` distance in `3.25 h`, executing `2` **`⚡ SOLAR_REGEN_HOLD`** stops (`2.06 h + 0.15 h` to `90.0%` SoC) and arriving inside `0%` sunlight PSR target at `84.9%` (`1,019.1 Wh`) battery and `100%` Base Pod LOS.
+5. **Reproducible Mission Exports & Offline Resilience**
+   - Exports auditable JSON and CSV packages with `MOON_ME_DE421` coordinates, SHA-256 dataset provenance, fail-closed `NaN -> UNKNOWN` handling, and full offline replay using SHA-256 cached JPL Horizons fixtures and bundled LOLA terrain binaries.
+
+---
+
+## NASA Data, Space Agency Partner Resources & Engineering Sources
+
+### NASA Datasets & Planetary Services
+- **NASA LRO LOLA South Polar DEMs (GSFC PGDA Product 90):** `LDEM_80S_80MPP_ADJ.TIF` (`7,600 × 7,600` float32, `80 m/px`) & `LDEM_80S_20MPP_ADJ.TIF` (`20 m/px`) — `https://pgda.gsfc.nasa.gov/products/90`
+- **NASA LRO LOLA 5 m/pixel Polar Site DEM (GSFC PGDA Product 78):** `Site01_final_adj_5mpp_surf.tif` (`_surf`, `_ldec`, `_slp`, `_toterr`, `_slperr`) — `https://pgda.gsfc.nasa.gov/data/LOLA_5mpp/Site01/`
+- **NASA JPL Horizons On-Line Ephemeris System (`DE421`, `MOON_ME_DE421`):** Sun (`NAIF 10`) and Earth (`NAIF 399`) topocentric observer `@301` quantities `4`, `13`, `20` — `https://ssd.jpl.nasa.gov/api/horizons.api`
+- **NASA / GSFC / ASU LROC Wide Angle Camera Mosaic (`luna_wac_global`):** Draped onto the 3D lunar globe via Lunaserv WMS (`IAU2000:30100`) — `https://wms.im-ldi.com/`
+- **NASA Moon Trek & LROC QuickMap:** Feature cross-verification and coordinate external links (`https://trek.nasa.gov/moon/`, `https://quickmap.lroc.im-ldi.com/`).
+
+### 2026 NASA Space Apps Space Agency Partner Resource
+- **Canadian Space Agency (CSA) — Moon Exploration Portal:** Linked inside the mission external reference controls (`https://www.asc-csa.gc.ca/eng/astronomy/moon-exploration/`).
+
+---
+
+## Quickstart & Local Verification
+
+### 1. Run the Backend API (Python 3.14)
+
+```bash
+uv python install 3.14
+uv sync --project backend --extra dev --locked
+uv run --project backend --locked python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+*(See [`backend/README.md`](./backend/README.md) for pip setup and configuration options.)*
+
+### 2. Run the Frontend Mission Cockpit (Node 24)
+
+```bash
 npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open Vite's printed local URL. The preview requires no Python process or NASA requests. See [frontend instructions](frontend/README.md) for modes, state flow and manual checks. The [standalone D scene](frontend/src/scene/README.md) remains available independently.
+Open Vite's printed local URL (`http://localhost:5173`). Static catalog terrain inspection, 3D globe rendering, and offline fallback analyses remain interactive even when the Python backend is stopped. *(See [`frontend/README.md`](./frontend/README.md) for frontend details.)*
 
-## Checks
+### 3. Run the Verified Automated Test Suite (`184` Passing Checks)
 
-```sh
+```bash
+# Backend scientific, terrain, ephemeris, LunaDiff, and rover traverse suite (153 tests)
+python3 -m pytest backend/tests/ -q
+
+# Shared JSON Schema Draft 2020-12 contract suite (8 tests, 5 subtests)
+python3 -m pytest tests/test_contracts.py -q
+
+# Frontend UI, state, slope logic & catalog unit tests (23 tests)
 npm --prefix frontend test
+
+# Production bundle build check
 npm --prefix frontend run build
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-python scripts/validate_fixtures.py
-python -m unittest discover -s tests -v
 ```
 
-These checks validate UI compilation, scene geometry/directions, adapter rules and synthetic contracts. They do not validate astronomy or certify terrain science. Backend setup and science tests are documented separately in [backend/README.md](backend/README.md).
+---
 
-## Integration boundaries
+## Super Intelligence (SI) Attribution & Disclosure
 
-A owns astronomy/API; B owns terrain processing; C owns the mission frontend; D owns the scene, shared formats and delivery checks. See [contract conventions](docs/contracts.md). The B-format adapter supports inspection without overwriting producer metadata; real terrain and ephemerides must use the same verified site coordinates, observer elevation and coordinate conventions.
+Team **LR-007** originated the lunar south-pole challenge design, spherical curvature horizon math, LunaDiff launch-delay diagnostics, and constrained PSR rover traverse methodology independently, and used **Super Intelligence (SI)** software (**ChatGPT**, **OpenAI Codex**, and **Google Antigravity**) strictly as development, scripting, and documentation assistants:
 
-The source documents in `notes/` are preserved. The original learning dashboard/health server remain recoverable at commit `69ffee8` in Git history.
+- **Assisted:** React/TypeScript UI panel scaffolding, CesiumJS tactical overlay helpers, FastAPI endpoint boilerplate, test authoring, slide generation scripting (`scripts/generate_spaceapps_slides.py`), and Markdown documentation formatting.
+- **Deterministic Runtime Physics:** Zero generative AI runs at runtime—every elevation, slope, 360° horizon obstruction, solar/Earth visibility fraction, and rover traverse trajectory is computed deterministically from verified NASA LOLA DEMs and JPL Horizons `DE421` ephemerides.
+- **Branding Compliance:** No NASA logos, flags, insignias, or mission identifiers were generated, modified, or included in any SI-assisted code, documentation, or presentation visuals.
+- **Embedded Project Disclosures:** Matching SI disclosures are included in [`frontend/index.html`](./frontend/index.html) (`<meta name="ai-disclosure" ...>`), [`docs/presentation/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/presentation/HORIZON_OPS_7_Slide_Demo.pdf) slide footers, and [`docs/NASA_SPACE_APPS_SUBMISSION_PACK.md`](./docs/NASA_SPACE_APPS_SUBMISSION_PACK.md).
