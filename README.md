@@ -1,13 +1,13 @@
 # HORIZON OPS (`LR-007`)
 
 **Lunar South Pole Landing Site, Mission Window, LunaDiff & Rover Traverse Navigator**  
-*2026 NASA Space Apps Challenge Submission — Team LR-007*
+*2026 NASA Space Apps Challenge Submission — Team Lunar Rangers 007*
 
 ---
 
 ## Project Demo
-
-- **7-Slide Project Demo Deck (PDF):** [`docs/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/HORIZON_OPS_7_Slide_Demo.pdf) ([public GitHub link](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/HORIZON_OPS_7_Slide_Demo.pdf))
+<img width="1920" height="1048" alt="image" src="https://github.com/user-attachments/assets/171ba6ac-1386-4d07-a928-be8987899a78" />
+- **Project Presentation:** [`docs/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/LR-007-HORIZON_OPS.pdf) ([public GitHub link]([https://github.com/Abivarsan-Y/LR-007/blob/main/docs/HORIZON_OPS_7_Slide_Demo.pdf](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/LR-007-HORIZON_OPS.pdf)))
 
 ---
 
