@@ -22,3 +22,5 @@ data/cache/
 
 .vite/
 .pytest_cache/
+
+/experiments/cesium-lab/public/cesium/

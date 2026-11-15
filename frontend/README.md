@@ -1,47 +1,40 @@
-# HORIZON OPS frontend — C/D integration preview
+# HORIZON OPS frontend — Cesium integration
 
-React + Vite + TypeScript dashboard with Person D's React Three Fiber scene embedded in Person C's layout.
+The Frontend-Overhaul layout now uses Cesium for its main Moon view. Search, sidebars, horizon chart, timeline, 2D map and recorded analysis remain in the dashboard.
 
 ## Run from the repository root
 
-Use Node 24 and npm (CI uses Node 24).
+Use Node 24 and npm.
 
 ```sh
 npm --prefix frontend ci
 npm --prefix frontend run dev
 ```
 
-Open the local URL printed by Vite. No Python server or NASA access is required for this preview. Stop the server with Ctrl+C.
+Open the URL printed by Vite. The dashboard can read its bundled science fixtures without a Python server; lunar imagery requires internet access. No Cesium ion token is needed.
 
 ```sh
 npm --prefix frontend test
 npm --prefix frontend run build
 ```
 
-The build includes type checking. A large-chunk warning reflects the lazily loaded Three.js scene; it is a performance follow-up, not a failed build. The scene dependencies are installed by the main frontend; Vite deduplicates React/ReactDOM/Three/Fiber even if the independent scene preview was installed separately.
+Vite copies the installed Cesium Assets, Widgets, Workers and ThirdParty directories into ignored `public/cesium` on start/build. Do not commit those generated assets. Deployment currently assumes the site is hosted at `/`. The build includes TypeScript checking; Cesium produces a large-bundle warning.
 
-## Two explicitly different modes
+## Real data and boundaries
 
-- **Site terrain grid · unverified** (default): selecting a landing site loads its exported JSON from `data/processed/`. The adapter anchors the marker to the grid's sampled observer height and shows the stored nominal elevation separately. Frame/orientation/height-reference validation is pending, so Sun/Earth overlays and fixture scrubbing are disabled. Lighting is neutral illustration, not sunlight computation.
-- **Synthetic direction demo**: the existing artificial crater and celestial angles are displayed. The shared three-sample fixture timeline updates the selected MET, UTC and scene directions. Its timestamps remain the fixture's actual UTC values. It does not recalculate results for selected mission dates or landing sites.
+- The global Moon is a 1,737,400 m reference sphere with real LROC WAC imagery streamed from [Lunaserv](https://wms.im-ldi.com/), layer `luna_wac_global`, WMS 1.1.1, `IAU2000:30100`. Global elevation tiles are not connected.
+- Connecting Ridge (Site 01) has a verified 129 × 129 LOLA elevation crop, 20 m spacing, and recorded JPL Horizons analysis at the canonical MOON_ME_DE421 observer and 2 m mast. Select it through search, then choose OBLIQUE or HORIZON to inspect the local terrain. The global globe is hidden in this local view so it cannot cover negative terrain heights.
+- Local offsets are mapped onto the lunar sphere using spherical forward geodesics. Heights use the declared reference radius and canonical observer elevation. Vertical exaggeration changes only the display, never the stored science values.
+- Sun/Earth vectors require matching coordinates, frame, radius, elevation, observer height and real-data provenance. They retain negative elevations. The timeline selects recorded samples; the renderer does not compute ephemerides or terrain shadows. Imagery contains acquisition-time lighting.
+- Only the 2 m observer has verified recorded Site01 results, so its 5 m toggle is disabled. Arbitrary coordinates are inspection only: elevation is not sampled, analysis is unknown, vectors are hidden and exports disabled. Other catalog previews do not gain verified local relief from this integration.
+- An imagery failure is reported; no procedural Moon is substituted. The old main procedural renderer has been removed. Legacy independent scene previews are separate from this main view.
 
-The site controls still store planning inputs in React state. Telemetry remains synthetic and static, clearly labeled, independent of the terrain shown. The 2D map, real visibility engine, scientific shadows, live API analysis, LunaDiff and exports are not connected in this integration.
+## State flow
 
-## State and handoff
+`App.tsx` owns the selected site, workspace, timeline sample and display settings. The existing API client loads recorded analysis and validates/decodes terrain. Selection requests are sequenced to prevent an older response replacing a newer selection. `CesiumLunarStage` receives those values and manages Cesium resources; camera interaction does not alter the recorded science. Replacing a patch removes its old primitives; unmount destroys the viewer and handlers.
 
-`App.tsx` owns mission setup, terrain source and selected sample index. `LunarViewport` maps C's site IDs to B's four JSON assets, validates/adapts the selected grid and supplies mesh props to `SceneView`. Loading is keyed by site/source/retry; old results cannot be displayed under a new site's label. A failed load shows a retry action. Switching sites or modes unmounts/replaces scene resources; the binary loader is still supported for the synthetic mode.
+## Validation
 
-`TimelineScrubber` is controlled by App and selects a fixture sample. Numeric direction values remain outside WebGL. The renderer also enforces hiding celestial overlays for `dataKind="unverified"`, even if a caller requests them. C can later replace the fixture provider with verified A/B results while preserving the controlled component boundary.
+The frontend tests cover existing contracts/terrain decoding plus lunar coordinate conversion, WMS requests, ENU directions and observer matching. Browser checks exercised the loaded imagery, verified Site01 selection, local relief and slope overlay, and unknown analysis at an arbitrary coordinate. This does not validate landing safety or new ephemeris computations.
 
-Pending science handoff: verify B's crop location, grid orientation, nodata handling, reference sphere and actual observer height; use those same coordinates/heights in A's ephemeris request. Do not relabel current exported grids as scientifically validated. No backend producer code or source terrain files were changed by this integration.
-
-See [scene documentation](src/scene/README.md) and [contract conventions](../docs/contracts.md).
-
-## Manual checks
-
-1. Default view loads Connecting Ridge and reports nominal/site-grid height differences without celestial overlays.
-2. Change site to Shackleton/Malapert/Haworth: its terrain loads; the previous mesh is not retained under the new title.
-3. Select synthetic direction demo, then scrub the timeline: UTC/MET and Sun angle values change together. Planning-date edits must not change fixture UTC.
-4. Test overview/surface/reset, wireframe, height exaggeration, orbit and zoom.
-5. Return to site terrain: timeline disables and celestial overlays disappear.
-6. The 2D tab says the map is pending; it does not pretend to render a geographic map.
+Inherited recommendation/safe-haven UI and the separate 2D view remain work owned by their existing producers; their labels do not certify a site. Global DEM streaming, scientific shadows, bundle splitting and additional verified observers are follow-ups.

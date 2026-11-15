@@ -575,9 +575,9 @@ export async function loadCatalogSiteWorkspace(
         isCatalogSite: true,
         catalogEntry: site,
       },
-      sourceMode: liveAnalysis.provenance.data_kind === 'live' ? 'live_api' : 'cached_real',
+      sourceMode: liveAnalysis.provenance.data_kind === 'live_real' ? 'live_api' : 'cached_real',
       sourceNote:
-        liveAnalysis.provenance.data_kind === 'live'
+        liveAnalysis.provenance.data_kind === 'live_real'
           ? 'Live FastAPI engine + verified NASA LOLA DEM'
           : 'Verified FastAPI cached NASA LOLA DEM & JPL Horizons',
       analysis: liveAnalysis,
@@ -590,7 +590,7 @@ export async function loadCatalogSiteWorkspace(
   }
 
   // Case 2: Connecting Ridge canonical site offline fixture fallback (real tracked data).
-  if (site.id === 'site01_connecting_ridge') {
+  if (site.id === 'site01_connecting_ridge' && observerHeightM === 2) {
     const [{ default: nominal }, { default: diff }] = await Promise.all([
       import('../../../backend/tests/fixtures/science/site01/analysis_nominal.json') as Promise<{
         default: ContractAnalysisDocument
@@ -611,10 +611,7 @@ export async function loadCatalogSiteWorkspace(
         catalogEntry: site,
       },
       sourceMode: 'cached_real',
-      sourceNote:
-        observerHeightM === 5
-          ? 'Real NASA LOLA + JPL Horizons fixture (2.0 m cached reference)'
-          : 'Real NASA LOLA DEM + 14-day JPL Horizons (Nov 15–29, 2026)',
+      sourceNote: 'Real NASA LOLA DEM + 14-day JPL Horizons (Nov 15–29, 2026)',
       analysis: nominal,
       diff48h: diff,
       recommendations,
@@ -686,27 +683,15 @@ export function buildCustomCoordinateWorkspace(options: {
   horizonAnglesDeg: number[]
 }): LoadedSiteWorkspace {
   const normLon = normalizeLongitudeDeg(options.longitude_deg)
-  const step = 360 / Math.max(options.horizonAnglesDeg.length, 1)
-  const horizon: ContractHorizonPoint[] = options.horizonAnglesDeg.map((el, i) => ({
-    azimuth_deg: i * step,
-    elevation_deg: Number.isFinite(el) ? el : null,
-    coverage: Number.isFinite(el) ? 'complete' : 'unknown',
-  }))
-
-  const analysis = buildExploratoryAnalysis({
-    siteId: `coord-${options.latitude_deg.toFixed(2)}-${normLon.toFixed(1)}`,
-    latitude_deg: options.latitude_deg,
-    longitude_deg: normLon,
-    elevation_m: options.elevation_m,
-    observerHeightM: options.observerHeightM,
-    horizon,
-    slopeDeg: null,
-    modelVersion: 'spherical-explorer-preview-v1',
-    assumptions: [
-      'Unverified exploratory coordinate outside the 4 pre-processed NASA LOLA high-res DEM patches.',
-      'Horizon and visibility values reflect spherical analytical exploration only; not flight-certified.',
-    ],
-  })
+  const analysis: ContractAnalysisDocument = {
+    schema_version: '0.1.0',
+    provenance: { data_kind: 'synthetic', model_version: 'coordinate-inspection-only', sources: [], assumptions: ['Coordinate inspection only. Terrain elevation and ephemerides have not been calculated. This empty view model is not a completed analysis response.'] },
+    analysis_id: 'inspection-only', site_id: `coord-${options.latitude_deg}-${normLon}`,
+    coordinates: { latitude_deg: options.latitude_deg, longitude_deg: normLon, elevation_m: options.elevation_m, frame: 'MOON_ME_DE421', reference_radius_m: 1737400 },
+    start_utc: DEFAULT_START_UTC, end_utc: DEFAULT_START_UTC, observer_height_m: options.observerHeightM,
+    sample_minutes: DEFAULT_SAMPLE_MINUTES, samples: [], horizon: [], slope: { angle_deg: null, screening_status: 'UNKNOWN' },
+    metrics: { sunlight_hours: null, sunlight_fraction: null, max_darkness_hours: null, earth_visible_hours: null, earth_visible_fraction: null, max_earth_occlusion_hours: null, both_visible_hours: null },
+  }
 
   return {
     target: {
@@ -718,7 +703,7 @@ export function buildCustomCoordinateWorkspace(options: {
       isCatalogSite: false,
     },
     sourceMode: 'synthetic',
-    sourceNote: 'Exploratory spherical terrain preview (outside LOLA DEM patches)',
+    sourceNote: 'Coordinate inspection only · no terrain or ephemeris analysis available',
     analysis,
     diff48h: null,
     recommendations: null,
