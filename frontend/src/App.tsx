@@ -1040,6 +1040,12 @@ export function App() {
   )
 
   const handleLaunchRoverPlanner = useCallback(() => {
+    if (workspace && traverseOpen) {
+      setTraverseOpen(false)
+      setIsRoverPlaying(false)
+      setPickingTraverseTarget(false)
+      return
+    }
     setDetailsVisible(true)
     setLeftSidebarOpen(true)
     setTraverseOpen(true)
@@ -1050,7 +1056,7 @@ export function App() {
     window.setTimeout(() => {
       traverseSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }, 60)
-  }, [workspace, selectCatalogSite])
+  }, [workspace, traverseOpen, selectCatalogSite])
 
   return (
     <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
@@ -1252,10 +1258,14 @@ export function App() {
             <span className="hidden sm:inline">2D</span>
           </button>
 
-          {/* Rover Traverse Planner Launch / Focus Button */}
+          {/* Rover Traverse Planner Launch / Toggle Button */}
           <button
             type="button"
-            title="Open Lunar Rover Traverse Planner (Manual & Automatic Modes)"
+            title={
+              workspace && traverseOpen
+                ? 'Deactivate Lunar Rover Traverse Planner'
+                : 'Open Lunar Rover Traverse Planner (Manual & Automatic Modes)'
+            }
             onClick={handleLaunchRoverPlanner}
             aria-pressed={Boolean(workspace && traverseOpen)}
             className={`shrink-0 px-2.5 py-1 rounded-full text-[9px] font-mono-tech tracking-[0.12em] uppercase border transition flex items-center gap-1 ${

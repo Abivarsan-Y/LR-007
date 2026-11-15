@@ -53,9 +53,13 @@ interface Props {
 }
 interface Runtime {
   viewer: C.Viewer; patch: C.Primitive | null; wire: C.PolylineCollection | null
+  stars: C.PointPrimitiveCollection | null
   bounds: C.BoundingSphere | null; local: boolean
   rays: C.Entity[]; target: C.Entity | null; catalog: C.Entity[]; traverse: C.Entity[]; provider: C.WebMapServiceImageryProvider
   patchCentre: C.Cartesian3 | null
+  frameEastM: number
+  frameNorthM: number
+  frameRelYScaled: number
 }
 const MOON = new C.Ellipsoid(RADIUS, RADIUS, RADIUS)
 function svgDataUri(svg: string) {
@@ -125,8 +129,95 @@ function terrainPosition(
 function getEffectiveVerticalScale(dem: DecodedDemSiteTerrain | null, userScale: number): number {
   if (!dem) return userScale
   const span = Math.max(80, dem.maxRelY - dem.minRelY)
-  const boost = Math.max(1.35, Math.min(2.8, 650 / span))
+  const boost = Math.max(0.85, Math.min(2.6, 650 / span))
   return userScale * boost
+}
+
+const demStatsCache = new WeakMap<DecodedDemSiteTerrain, { meanRelY: number; elevSpan: number }>()
+
+function getDemStats(dem: DecodedDemSiteTerrain): { meanRelY: number; elevSpan: number } {
+  const cached = demStatsCache.get(dem)
+  if (cached) return cached
+  const { width, height } = dem.metadata
+  const coreCount = width * height
+  const coreValid = new Uint8Array(coreCount)
+  for (let i = 0; i < dem.indices.length; i++) {
+    const idx = dem.indices[i]
+    if (idx < coreCount) coreValid[idx] = 1
+  }
+  let sumRelY = 0
+  let validCoreCount = 0
+  for (let i = 0; i < coreCount; i++) {
+    if (!coreValid[i]) continue
+    sumRelY += dem.positions[i * 3 + 1]
+    validCoreCount++
+  }
+  const meanRelY = validCoreCount > 0 ? sumRelY / validCoreCount : (dem.groundY ?? 0)
+  const elevSpan = Math.max(1.0, dem.maxRelY - dem.minRelY)
+  const stats = { meanRelY, elevSpan }
+  demStatsCache.set(dem, stats)
+  return stats
+}
+
+function computeSkirtRelY(
+  edgeRelY: number,
+  eastM: number,
+  northM: number,
+  skirtRadial: number,
+  meanRelY: number,
+  elevSpan: number,
+): number {
+  const sT = skirtRadial * skirtRadial * (3 - 2 * skirtRadial)
+  const macroWave =
+    Math.sin(eastM * 0.0014 + northM * 0.0009) * 0.5 +
+    Math.cos(eastM * 0.0007 - northM * 0.0016) * 0.5
+  const mesoCrater =
+    Math.sin(eastM * 0.0038) * Math.cos(northM * 0.0034) * 0.5 +
+    Math.sin((eastM - northM) * 0.0029) * 0.35
+  const reliefAmp = Math.min(55, elevSpan * 0.1)
+  const targetSkirtRelY =
+    edgeRelY * 0.88 + meanRelY * 0.12 + reliefAmp * 0.6 * macroWave + reliefAmp * 0.4 * mesoCrater
+  return edgeRelY * (1 - sT) + targetSkirtRelY * sT
+}
+
+function sampleLocalSurfaceRelY(
+  dem: DecodedDemSiteTerrain,
+  eastM: number,
+  northM: number,
+  meanRelY: number,
+): number {
+  const { width, height, spacing_m: spacing } = dem.metadata
+  const halfW = (width - 1) / 2
+  const halfH = (height - 1) / 2
+  const fCol = eastM / spacing + halfW
+  const fRow = -northM / spacing + halfH
+  const cClamped = Math.max(0, Math.min(width - 1, fCol))
+  const rClamped = Math.max(0, Math.min(height - 1, fRow))
+  const c0 = Math.floor(cClamped)
+  const r0 = Math.floor(rClamped)
+  const c1 = Math.min(width - 1, c0 + 1)
+  const r1 = Math.min(height - 1, r0 + 1)
+  const fx = cClamped - c0
+  const fy = rClamped - r0
+  const h00 = dem.positions[(r0 * width + c0) * 3 + 1]
+  const h10 = dem.positions[(r0 * width + c1) * 3 + 1]
+  const h01 = dem.positions[(r1 * width + c0) * 3 + 1]
+  const h11 = dem.positions[(r1 * width + c1) * 3 + 1]
+  const edgeRelY =
+    h00 * (1 - fx) * (1 - fy) +
+    h10 * fx * (1 - fy) +
+    h01 * (1 - fx) * fy +
+    h11 * fx * fy
+
+  const halfSpanE = halfW * spacing
+  const halfSpanN = halfH * spacing
+  const overE = Math.max(0, Math.abs(eastM) - halfSpanE)
+  const overN = Math.max(0, Math.abs(northM) - halfSpanN)
+  if (overE === 0 && overN === 0) return edgeRelY
+
+  const skirtRadial = Math.min(1, Math.hypot(overE, overN) / 4508)
+  const elevSpan = Math.max(1.0, dem.maxRelY - dem.minRelY)
+  return computeSkirtRelY(edgeRelY, eastM, northM, skirtRadial, meanRelY, elevSpan)
 }
 
 function discardPatch(rt: Runtime) {
@@ -147,15 +238,7 @@ function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope
     if (idx < coreCount) coreValid[idx] = 1
   }
 
-  let sumRelY = 0
-  let validCoreCount = 0
-  for (let i = 0; i < coreCount; i++) {
-    if (!coreValid[i]) continue
-    sumRelY += dem.positions[i * 3 + 1]
-    validCoreCount++
-  }
-  const meanRelY = validCoreCount > 0 ? sumRelY / validCoreCount : 0
-  const elevSpan = Math.max(1.0, dem.maxRelY - dem.minRelY)
+  const { meanRelY, elevSpan } = getDemStats(dem)
   const contourStep = Math.max(10, Math.round(elevSpan / 10))
 
   const SKIRT_RINGS = 14
@@ -215,16 +298,7 @@ function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope
 
         const edgeRelY = dem.positions[cIdx * 3 + 1]
         skirtRadial = Math.min(1, Math.hypot(dcOut, drOut) / SKIRT_RINGS)
-        const sT = skirtRadial * skirtRadial * (3 - 2 * skirtRadial)
-        const macroWave =
-          Math.sin(eastM * 0.0014 + northM * 0.0009) * 0.5 +
-          Math.cos(eastM * 0.0007 - northM * 0.0016) * 0.5
-        const mesoCrater =
-          Math.sin(eastM * 0.0038) * Math.cos(northM * 0.0034) * 0.5 +
-          Math.sin((eastM - northM) * 0.0029) * 0.35
-        const targetSkirtRelY =
-          meanRelY * 0.55 + elevSpan * 0.16 * macroWave + elevSpan * 0.09 * mesoCrater
-        relY = edgeRelY * (1 - sT) + targetSkirtRelY * sT
+        relY = computeSkirtRelY(edgeRelY, eastM, northM, skirtRadial, meanRelY, elevSpan)
       }
 
       eastArr[eIdx] = eastM
@@ -400,7 +474,12 @@ function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope
   })
 
   rt.bounds = C.BoundingSphere.fromVertices(coreVertices) ?? geometry.boundingSphere ?? null
-  rt.patchCentre = position(origin.longitude_deg, origin.latitude_deg, origin.elevation_m)
+  const centerRelY = dem.groundY ?? meanRelY
+  rt.patchCentre = position(
+    origin.longitude_deg,
+    origin.latitude_deg,
+    origin.elevation_m + centerRelY * scale,
+  )
   rt.patch = rt.viewer.scene.primitives.add(
     new C.Primitive({
       geometryInstances: new C.GeometryInstance({ geometry }),
@@ -448,6 +527,70 @@ function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope
   rt.wire = rt.viewer.scene.primitives.add(wire)
 }
 
+/** Multi-layer 3D starfield with tilted galactic band and varied star colors/halos (inspired by phase-5/c-ui-polish). */
+function makeStarfield(): C.PointPrimitiveCollection {
+  const collection = new C.PointPrimitiveCollection({ blendOption: C.BlendOption.TRANSLUCENT })
+  let seed = 0x51a7f31d
+  const nextRand = () => {
+    seed = (Math.imul(1664525, seed) + 1013904223) >>> 0
+    return seed / 4294967296
+  }
+
+  // Match THREE.Euler(0.85, 0, 0.42, 'ZYX'): Rx(0.85) then Rz(0.42)
+  const cosX = Math.cos(0.85)
+  const sinX = Math.sin(0.85)
+  const cosZ = Math.cos(0.42)
+  const sinZ = Math.sin(0.42)
+
+  const layers = [
+    { count: 2900, pixelSize: 1.15, haloWidth: 0.4, css: '#b8c9ff', opacity: 0.57, band: false },
+    { count: 3500, pixelSize: 1.05, haloWidth: 0.4, css: '#b8c9ff', opacity: 0.50, band: true },
+    { count: 580, pixelSize: 1.65, haloWidth: 0.8, css: '#d1e1ff', opacity: 0.76, band: false },
+    { count: 90, pixelSize: 2.3, haloWidth: 1.2, css: '#eaf4ff', opacity: 0.96, band: false },
+    { count: 25, pixelSize: 3.4, haloWidth: 1.8, css: '#a6cdff', opacity: 1.0, band: false },
+    { count: 14, pixelSize: 2.8, haloWidth: 1.4, css: '#ffebd5', opacity: 0.93, band: false },
+  ]
+
+  for (const layer of layers) {
+    const baseColor = C.Color.fromCssColorString(layer.css)
+    const color = baseColor.withAlpha(layer.opacity)
+    const outlineColor = baseColor.withAlpha(layer.opacity * 0.24)
+    for (let i = 0; i < layer.count; i++) {
+      const theta = nextRand() * Math.PI * 2
+      const bandWidth = 0.20 + 0.085 * Math.sin(theta * 7)
+      const bandCenter = 0.07 * Math.sin(theta * 3 + 0.6)
+      const y0 = layer.band
+        ? bandCenter + (nextRand() + nextRand() - 1) * bandWidth
+        : 2 * nextRand() - 1
+      const clampedY = Math.max(-0.9999, Math.min(0.9999, y0))
+      const horizontal = Math.sqrt(1 - clampedY * clampedY)
+      const x0 = horizontal * Math.cos(theta)
+      const z0 = horizontal * Math.sin(theta)
+
+      let px = x0
+      let py = clampedY
+      let pz = z0
+      if (layer.band) {
+        const y1 = clampedY * cosX - z0 * sinX
+        const z1 = clampedY * sinX + z0 * cosX
+        px = x0 * cosZ - y1 * sinZ
+        py = x0 * sinZ + y1 * cosZ
+        pz = z1
+      }
+
+      const r = RADIUS * (180 + nextRand() * 60)
+      collection.add({
+        position: new C.Cartesian3(px * r, py * r, pz * r),
+        pixelSize: layer.pixelSize,
+        color,
+        outlineColor,
+        outlineWidth: layer.haloWidth,
+      })
+    }
+  }
+  return collection
+}
+
 /** Cesium viewer adapter. No procedural global heights or invented local terrain. */
 export function CesiumLunarStage(props: Props) {
   const host=useRef<HTMLDivElement>(null), runtime=useRef<Runtime|null>(null), latest=useRef(props)
@@ -460,7 +603,7 @@ export function CesiumLunarStage(props: Props) {
   const effectiveScale=getEffectiveVerticalScale(props.demTerrain,props.verticalScale)
   useEffect(()=>{
     if(!host.current)return
-    let rt:Runtime|null=null,picker:C.ScreenSpaceEventHandler|undefined,alive=true,failed=false
+    let rt:Runtime|null=null,picker:C.ScreenSpaceEventHandler|undefined,renderError:(()=>void)|undefined,clampSurfaceCamera:(()=>void)|undefined,alive=true,failed=false
     try{
       C.Ellipsoid.default=MOON
       const viewer=new C.Viewer(host.current,{ellipsoid:MOON,terrainProvider:new C.EllipsoidTerrainProvider({ellipsoid:MOON}),baseLayer:false,baseLayerPicker:false,geocoder:false,homeButton:false,sceneModePicker:false,timeline:false,animation:false,navigationHelpButton:false,fullscreenButton:false,selectionIndicator:false,infoBox:false,skyBox:false,skyAtmosphere:false,requestRenderMode:true})
@@ -468,9 +611,12 @@ export function CesiumLunarStage(props: Props) {
       if(viewer.scene.moon)viewer.scene.moon.show=false
       viewer.scene.globe.showGroundAtmosphere=false;viewer.scene.globe.enableLighting=false
       viewer.scene.backgroundColor=C.Color.fromCssColorString('#050507')
+      viewer.scene.screenSpaceCameraController.minimumZoomDistance=12000
+      viewer.scene.screenSpaceCameraController.maximumZoomDistance=RADIUS*4.2
+      const stars=viewer.scene.primitives.add(makeStarfield()) as C.PointPrimitiveCollection
       const provider=new C.WebMapServiceImageryProvider({url:WMS_URL,layers:'luna_wac_global',parameters:{version:'1.1.1',srs:'IAU2000:30100',format:'image/jpeg',transparent:false},tilingScheme:new C.GeographicTilingScheme({ellipsoid:MOON}),maximumLevel:10,enablePickFeatures:false,credit:'NASA / GSFC / ASU · LROC WAC via Lunaserv'})
       viewer.imageryLayers.addImageryProvider(provider)
-      rt={viewer,provider,patch:null,wire:null,bounds:null,local:false,rays:[],target:null,catalog:[],traverse:[],patchCentre:null}
+      rt={viewer,provider,patch:null,wire:null,stars,bounds:null,local:false,rays:[],target:null,catalog:[],traverse:[],patchCentre:null,frameEastM:0,frameNorthM:0,frameRelYScaled:0}
       runtime.current=rt
       latest.current.onNasaImageryStatusChange?.('loading')
       provider.errorEvent.addEventListener(()=>{if(!alive)return;failed=true;setMessage('LROC imagery unavailable. No synthetic image is substituted.');latest.current.onNasaImageryStatusChange?.('offline')})
@@ -558,11 +704,81 @@ export function CesiumLunarStage(props: Props) {
           horizonAnglesDeg:[],
         })
       },C.ScreenSpaceEventType.LEFT_CLICK)
-      const renderError=()=>{if(alive)setError('The 3D viewer stopped rendering. Reload to retry; the dashboard analysis remains available.')}
+      renderError=()=>{if(alive)setError('The 3D viewer stopped rendering. Reload to retry; the dashboard analysis remains available.')}
       viewer.scene.renderError.addEventListener(renderError)
+      const clampDirScratch = new C.Cartesian3()
+      const clampNormScratch = new C.Cartesian3()
+      const clampTanScratch = new C.Cartesian3()
+      const FOOTPRINT_OFFSETS: readonly [number, number][] = [
+        [0, 0],
+        [140, 0],
+        [-140, 0],
+        [0, 140],
+        [0, -140],
+      ]
+      clampSurfaceCamera = () => {
+        if (!alive || !rt || !rt.local || C.Matrix4.equals(viewer.camera.transform, C.Matrix4.IDENTITY)) {
+          return
+        }
+        viewer.camera.constrainedAxis = C.Cartesian3.UNIT_Z
+        const camPos = viewer.camera.position
+        let rho = C.Cartesian3.magnitude(camPos)
+        if (!Number.isFinite(rho) || rho < 1) return
+
+        const camEastM = rt.frameEastM + camPos.x
+        const camNorthM = rt.frameNorthM + camPos.y
+        const demTerrain = latest.current.demTerrain
+        const scale = getEffectiveVerticalScale(demTerrain, latest.current.verticalScale)
+        let maxFootprintRelYScaled = 0
+        if (demTerrain) {
+          const { meanRelY } = getDemStats(demTerrain)
+          maxFootprintRelYScaled = Number.NEGATIVE_INFINITY
+          for (const [de, dn] of FOOTPRINT_OFFSETS) {
+            const relY = sampleLocalSurfaceRelY(demTerrain, camEastM + de, camNorthM + dn, meanRelY)
+            const scaled = relY * scale
+            if (scaled > maxFootprintRelYScaled) maxFootprintRelYScaled = scaled
+          }
+          if (!Number.isFinite(maxFootprintRelYScaled)) maxFootprintRelYScaled = 0
+        }
+
+        const curvatureDropM = (camEastM * camEastM + camNorthM * camNorthM) / (2 * RADIUS)
+        const localTerrainZ = maxFootprintRelYScaled - rt.frameRelYScaled - curvatureDropM
+        const isHorizon = latest.current.surfacePreset === 'HORIZON'
+        const minElevRad = C.Math.toRadians(isHorizon ? 3 : 12)
+        const minClearanceM = isHorizon ? 16 : 80
+        const minTerrainZ = localTerrainZ + minClearanceM
+
+        const preMinAllowedZ = Math.max(rho * Math.sin(minElevRad), minTerrainZ)
+        if (rho < (preMinAllowedZ + 35) / 0.94) {
+          rho = Math.min(9500, Math.max(30, (preMinAllowedZ + 35) / 0.94))
+          C.Cartesian3.normalize(camPos, clampDirScratch)
+          C.Cartesian3.multiplyByScalar(clampDirScratch, rho, camPos)
+        }
+
+        const minAllowedZ = Math.max(rho * Math.sin(minElevRad), minTerrainZ)
+        if (camPos.z < minAllowedZ) {
+          const p = C.Cartesian3.normalize(camPos, clampNormScratch)
+          const curAngle = Math.acos(C.Math.clamp(p.z, -1, 1))
+          const maxAngle = Math.acos(C.Math.clamp(minAllowedZ / rho, -0.98, 0.96))
+          if (curAngle > maxAngle) {
+            const tangent = C.Cartesian3.cross(C.Cartesian3.UNIT_Z, p, clampTanScratch)
+            const axis =
+              C.Cartesian3.magnitudeSquared(tangent) > 1e-10
+                ? C.Cartesian3.normalize(tangent, tangent)
+                : C.Cartesian3.clone(viewer.camera.right, tangent)
+            viewer.camera.rotate(axis, curAngle - maxAngle)
+          }
+        }
+
+        const maxPitch = C.Math.toRadians(-4)
+        if (viewer.camera.pitch > maxPitch) {
+          viewer.camera.lookDown(viewer.camera.pitch - maxPitch)
+        }
+      }
+      viewer.scene.preRender.addEventListener(clampSurfaceCamera)
       setReady(v=>v+1)
     }catch(e){setError(e instanceof Error?e.message:'Cesium could not initialize')}
-    return()=>{alive=false;picker?.destroy();if(rt&&!rt.viewer.isDestroyed())rt.viewer.destroy();runtime.current=null}
+    return()=>{alive=false;picker?.destroy();if(rt&&!rt.viewer.isDestroyed()){if(clampSurfaceCamera)rt.viewer.scene.preRender.removeEventListener(clampSurfaceCamera);if(renderError)rt.viewer.scene.renderError.removeEventListener(renderError);rt.viewer.destroy()}runtime.current=null}
   },[])
 
   useEffect(()=>{
@@ -583,8 +799,11 @@ export function CesiumLunarStage(props: Props) {
     for(const marker of rt.catalog)marker.show=!local
     rt.viewer.camera.cancelFlight()
     rt.viewer.camera.lookAtTransform(C.Matrix4.IDENTITY)
+    rt.viewer.camera.constrainedAxis=local?C.Cartesian3.UNIT_Z:undefined
     const demOrigin=props.demTerrain?.metadata.coordinates??canonical.coordinates
     if(local&&rt.patchCentre&&rt.bounds){
+      rt.viewer.scene.screenSpaceCameraController.minimumZoomDistance=30
+      rt.viewer.scene.screenSpaceCameraController.maximumZoomDistance=9500
       const coreRadius=rt.bounds.radius
       const scale=getEffectiveVerticalScale(props.demTerrain,props.verticalScale)
       if(props.surfacePreset==='HORIZON'){
@@ -595,27 +814,59 @@ export function CesiumLunarStage(props: Props) {
         const backElev=props.demTerrain?sampleDemAtLatLon(props.demTerrain,eyeOffset.lat,eyeOffset.lon).elevationM:centerElev
         const safeBaseElev=Math.max(centerElev,backElev-28)
         const horizonOrigin=terrainPosition(focusLat,focusLon,safeBaseElev,demOrigin,scale,props.observerHeightM+22)
+        const {distanceM,bearingDeg}=sphericalDistanceAndBearing(demOrigin.latitude_deg,demOrigin.longitude_deg,focusLat,focusLon)
+        const brngRad=C.Math.toRadians(bearingDeg)
+        rt.frameEastM=distanceM*Math.sin(brngRad)
+        rt.frameNorthM=distanceM*Math.cos(brngRad)
+        rt.frameRelYScaled=(safeBaseElev-demOrigin.elevation_m)*scale+props.observerHeightM+22
+        const horizonOffset=new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-12),240)
         rt.viewer.camera.flyToBoundingSphere(new C.BoundingSphere(horizonOrigin,60),{
-          offset:new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-12),240),
+          offset:horizonOffset,
           duration:0.9,
           endTransform:C.Transforms.eastNorthUpToFixedFrame(horizonOrigin,MOON),
           complete:()=>{if(!rt.viewer.isDestroyed())rt.viewer.scene.requestRender()},
+          cancel:()=>{
+            if(!rt.local||rt.viewer.isDestroyed())return
+            const frame=C.Transforms.eastNorthUpToFixedFrame(horizonOrigin,MOON)
+            if(C.Cartesian3.distance(rt.viewer.camera.positionWC,horizonOrigin)>10000){
+              rt.viewer.camera.lookAtTransform(frame,horizonOffset)
+            }else{
+              rt.viewer.camera.lookAtTransform(frame)
+            }
+            rt.viewer.scene.requestRender()
+          },
         })
       }else{
-        const targetCenter=rt.bounds.center
-        const maxScaled=props.demTerrain?props.demTerrain.maxRelY*scale:0
-        const minScaled=props.demTerrain?props.demTerrain.minRelY*scale:0
-        const midScaled=(maxScaled+minScaled)*0.5
-        const obliqueRange=Math.max(coreRadius*1.12,(maxScaled-midScaled+320)/Math.sin(C.Math.toRadians(27)))
-        rt.viewer.camera.flyToBoundingSphere(new C.BoundingSphere(targetCenter,coreRadius),{
-          offset:new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-27),obliqueRange),
+        rt.frameEastM=0
+        rt.frameNorthM=0
+        rt.frameRelYScaled=(props.demTerrain?.groundY??0)*scale
+        const patchCentre=rt.patchCentre
+        const horizRadius=props.demTerrain
+          ?Math.hypot(props.demTerrain.metadata.width*props.demTerrain.metadata.spacing_m,props.demTerrain.metadata.height*props.demTerrain.metadata.spacing_m)*0.5
+          :coreRadius
+        const obliqueRange=Math.max(2150,Math.min(2550,horizRadius*1.28))
+        const obliqueOffset=new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-30),obliqueRange)
+        rt.viewer.camera.flyToBoundingSphere(new C.BoundingSphere(patchCentre,horizRadius),{
+          offset:obliqueOffset,
           duration:1.05,
-          endTransform:C.Transforms.eastNorthUpToFixedFrame(rt.patchCentre,MOON),
+          endTransform:C.Transforms.eastNorthUpToFixedFrame(patchCentre,MOON),
           complete:()=>{if(!rt.viewer.isDestroyed())rt.viewer.scene.requestRender()},
+          cancel:()=>{
+            if(!rt.local||rt.viewer.isDestroyed())return
+            const frame=C.Transforms.eastNorthUpToFixedFrame(patchCentre,MOON)
+            if(C.Cartesian3.distance(rt.viewer.camera.positionWC,patchCentre)>10000){
+              rt.viewer.camera.lookAtTransform(frame,obliqueOffset)
+            }else{
+              rt.viewer.camera.lookAtTransform(frame)
+            }
+            rt.viewer.scene.requestRender()
+          },
         })
       }
       props.onCameraModeChange('SURFACE')
     }else{
+      rt.viewer.scene.screenSpaceCameraController.minimumZoomDistance=12000
+      rt.viewer.scene.screenSpaceCameraController.maximumZoomDistance=RADIUS*4.2
       const focus=props.focusCoordinates
       rt.viewer.camera.flyTo({destination:focus?position(focus.longitude_deg,focus.latitude_deg,props.hasSelection?200000:RADIUS*3):position(0,-15,RADIUS*3),orientation:{heading:0,pitch:-C.Math.PI_OVER_TWO,roll:0},duration:.8})
       props.onCameraModeChange('ORBITAL')
@@ -646,9 +897,23 @@ export function CesiumLunarStage(props: Props) {
         ?sphericalDistanceAndBearing(lat,lon,props.activeRoverState.latitudeDeg,props.activeRoverState.longitudeDeg).distanceM
         :Number.POSITIVE_INFINITY
       const samePointAsRover=roverDistM<=(rt.local?180:6000)
+      const depthTestDist=rt.local?Number.POSITIVE_INFINITY:0
+      const labelFade=rt.local?undefined:new C.NearFarScalar(280000,1.0,850000,0.0)
+      const labelDistCond=rt.local?undefined:new C.DistanceDisplayCondition(0,850000)
+      const baseScale=rt.local?undefined:new C.NearFarScalar(220000,1.0,1600000,0.45)
+      const baseFade=rt.local?undefined:new C.NearFarScalar(450000,1.0,1600000,0.0)
+      const baseDistCond=rt.local?undefined:new C.DistanceDisplayCondition(0,1600000)
       rt.target=rt.viewer.entities.add({
         position:terrainPosition(lat,lon,baseElev,demOrigin,rt.local?effectiveScale:1,rt.local?props.observerHeightM:140),
-        billboard:{image:BASE_POD_ICON_URI,width:28,height:28,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        billboard:{
+          image:BASE_POD_ICON_URI,
+          width:28,
+          height:28,
+          scaleByDistance:baseScale,
+          translucencyByDistance:baseFade,
+          distanceDisplayCondition:baseDistCond,
+          disableDepthTestDistance:depthTestDist,
+        },
         label:{
           text:'BASE POD',
           font:'600 9px "JetBrains Mono", monospace',
@@ -657,7 +922,9 @@ export function CesiumLunarStage(props: Props) {
           outlineWidth:3,
           style:C.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset:new C.Cartesian2(0,samePointAsRover?22:-20),
-          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+          translucencyByDistance:labelFade,
+          distanceDisplayCondition:labelDistCond,
+          disableDepthTestDistance:depthTestDist,
         },
       })
     }
@@ -686,6 +953,12 @@ export function CesiumLunarStage(props: Props) {
     const pathOffset=rt.local?8:120
     const wpOffset=rt.local?10:140
     const tgtOffset=rt.local?18:150
+    const depthTestDist=rt.local?Number.POSITIVE_INFINITY:0
+    const labelFade=rt.local?undefined:new C.NearFarScalar(280000,1.0,850000,0.0)
+    const labelDistCond=rt.local?undefined:new C.DistanceDisplayCondition(0,850000)
+    const traverseScale=rt.local?undefined:new C.NearFarScalar(220000,1.0,1200000,0.4)
+    const traverseFade=rt.local?undefined:new C.NearFarScalar(350000,1.0,1200000,0.0)
+    const traverseDistCond=rt.local?undefined:new C.DistanceDisplayCondition(0,1200000)
 
     if(!rt.local&&props.researchTargets?.length){
       const catalogIds=new Set(props.catalogSites.map(s=>s.id))
@@ -700,7 +973,10 @@ export function CesiumLunarStage(props: Props) {
             image:tgt.category==='water_ice_crater'?ICE_CRATER_MARKER_URI:MAPPED_RIM_MARKER_URI,
             width:20,
             height:20,
-            disableDepthTestDistance:Number.POSITIVE_INFINITY,
+            scaleByDistance:traverseScale,
+            translucencyByDistance:traverseFade,
+            distanceDisplayCondition:traverseDistCond,
+            disableDepthTestDistance:depthTestDist,
           },
         }))
       }
@@ -712,7 +988,15 @@ export function CesiumLunarStage(props: Props) {
       rt.traverse.push(rt.viewer.entities.add({
         id:'traverse-target',
         position:terrainPosition(tgt.latitude_deg,tgt.longitude_deg,tgtElev,demOrigin,scale,tgtOffset),
-        billboard:{image:TARGET_RETICLE_ICON_URI,width:30,height:30,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        billboard:{
+          image:TARGET_RETICLE_ICON_URI,
+          width:30,
+          height:30,
+          scaleByDistance:traverseScale,
+          translucencyByDistance:traverseFade,
+          distanceDisplayCondition:traverseDistCond,
+          disableDepthTestDistance:depthTestDist,
+        },
         label:{
           text:tgt.shortLabel??tgt.label??'RESEARCH TARGET',
           font:'600 9px "JetBrains Mono", monospace',
@@ -721,7 +1005,9 @@ export function CesiumLunarStage(props: Props) {
           outlineWidth:3,
           style:C.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset:new C.Cartesian2(0,-22),
-          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+          translucencyByDistance:labelFade,
+          distanceDisplayCondition:labelDistCond,
+          disableDepthTestDistance:depthTestDist,
         },
       }))
     }
@@ -732,7 +1018,12 @@ export function CesiumLunarStage(props: Props) {
         const pathPositions=waypoints.map(wp=>terrainPosition(wp.coordinates.latitude_deg,wp.coordinates.longitude_deg,wp.coordinates.elevation_m,demOrigin,scale,pathOffset))
         rt.traverse.push(rt.viewer.entities.add({
           id:'traverse-path',
-          polyline:{positions:pathPositions,width:3.5,material:C.Color.fromCssColorString('#22d3ee')},
+          polyline:{
+            positions:pathPositions,
+            width:3.5,
+            material:C.Color.fromCssColorString('#22d3ee'),
+            distanceDisplayCondition:traverseDistCond,
+          },
         }))
       }
       for(const wp of waypoints){
@@ -746,7 +1037,10 @@ export function CesiumLunarStage(props: Props) {
             color:isRegenStop?C.Color.fromCssColorString('#f59e0b'):wp.los_to_base?C.Color.fromCssColorString('#34d399'):C.Color.fromCssColorString('#fbbf24'),
             outlineColor:isRegenStop?C.Color.fromCssColorString('#fde68a'):C.Color.BLACK,
             outlineWidth:isRegenStop?2:1.5,
-            disableDepthTestDistance:Number.POSITIVE_INFINITY,
+            scaleByDistance:traverseScale,
+            translucencyByDistance:traverseFade,
+            distanceDisplayCondition:traverseDistCond,
+            disableDepthTestDistance:depthTestDist,
           },
         }))
       }
@@ -757,7 +1051,15 @@ export function CesiumLunarStage(props: Props) {
       rt.traverse.push(rt.viewer.entities.add({
         id:'active-rover',
         position:terrainPosition(rover.latitudeDeg,rover.longitudeDeg,rover.elevationM,demOrigin,scale,wpOffset+4),
-        billboard:{image:ROVER_ICON_URI,width:28,height:28,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+        billboard:{
+          image:ROVER_ICON_URI,
+          width:28,
+          height:28,
+          scaleByDistance:traverseScale,
+          translucencyByDistance:traverseFade,
+          distanceDisplayCondition:traverseDistCond,
+          disableDepthTestDistance:depthTestDist,
+        },
         label:{
           text:`ROVER · T+${rover.metHours.toFixed(1)}h${rover.isRegenerating?' ⚡ REGEN':''}`,
           font:'600 9px "JetBrains Mono", monospace',
@@ -766,7 +1068,9 @@ export function CesiumLunarStage(props: Props) {
           outlineWidth:3,
           style:C.LabelStyle.FILL_AND_OUTLINE,
           pixelOffset:new C.Cartesian2(0,-22),
-          disableDepthTestDistance:Number.POSITIVE_INFINITY,
+          translucencyByDistance:labelFade,
+          distanceDisplayCondition:labelDistCond,
+          disableDepthTestDistance:depthTestDist,
         },
       }))
     }
@@ -785,13 +1089,27 @@ export function CesiumLunarStage(props: Props) {
         if(originPos&&cand.is_valid){
           rt.traverse.push(rt.viewer.entities.add({
             id:`traverse-cand-ray:${cand.candidate_id}`,
-            polyline:{positions:[originPos,candPos],width:cand.is_regen_spot?2.5:1.5,material:C.Color.fromCssColorString(colorCss).withAlpha(cand.is_regen_spot?0.85:0.55)},
+            polyline:{
+              positions:[originPos,candPos],
+              width:cand.is_regen_spot?2.5:1.5,
+              material:C.Color.fromCssColorString(colorCss).withAlpha(cand.is_regen_spot?0.85:0.55),
+              distanceDisplayCondition:traverseDistCond,
+            },
           }))
         }
         rt.traverse.push(rt.viewer.entities.add({
           id:`traverse-cand:${cand.candidate_id}`,
           position:candPos,
-          point:{pixelSize:cand.is_regen_spot?13:10,color:C.Color.fromCssColorString(colorCss),outlineColor:C.Color.BLACK,outlineWidth:cand.is_regen_spot?2:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+          point:{
+            pixelSize:cand.is_regen_spot?13:10,
+            color:C.Color.fromCssColorString(colorCss),
+            outlineColor:C.Color.BLACK,
+            outlineWidth:cand.is_regen_spot?2:1.5,
+            scaleByDistance:traverseScale,
+            translucencyByDistance:traverseFade,
+            distanceDisplayCondition:traverseDistCond,
+            disableDepthTestDistance:depthTestDist,
+          },
           ...(cand.is_regen_spot?{
             label:{
               text:'⚡ REGEN SPOT',
@@ -801,7 +1119,9 @@ export function CesiumLunarStage(props: Props) {
               outlineWidth:3,
               style:C.LabelStyle.FILL_AND_OUTLINE,
               pixelOffset:new C.Cartesian2(0,-16),
-              disableDepthTestDistance:Number.POSITIVE_INFINITY,
+              translucencyByDistance:labelFade,
+              distanceDisplayCondition:labelDistCond,
+              disableDepthTestDistance:depthTestDist,
             },
           }:{}),
         }))
