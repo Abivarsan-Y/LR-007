@@ -7,7 +7,7 @@
 
 ## Project Demo
 <img width="1920" height="1048" alt="image" src="https://github.com/user-attachments/assets/171ba6ac-1386-4d07-a928-be8987899a78" />
-- **Project Presentation:** [`docs/HORIZON_OPS_7_Slide_Demo.pdf`](./docs/LR-007-HORIZON_OPS.pdf) ([public GitHub link]([https://github.com/Abivarsan-Y/LR-007/blob/main/docs/HORIZON_OPS_7_Slide_Demo.pdf](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/LR-007-HORIZON_OPS.pdf)))
+- **Project Presentation:** [docs/HORIZON_OPS_7_Slide_Demo.pdf](./docs/LR-007-HORIZON_OPS.pdf) ([public GitHub link]([https://github.com/Abivarsan-Y/LR-007/blob/main/docs/HORIZON_OPS_7_Slide_Demo.pdf](https://github.com/Abivarsan-Y/LR-007/blob/main/docs/LR-007-HORIZON_OPS.pdf)))
 
 ---
 
