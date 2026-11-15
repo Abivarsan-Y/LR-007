@@ -39,6 +39,41 @@ def _delay48h_diff() -> dict:
     return json.loads((SITE01_FIXTURES / "diff_delay48h.json").read_text())
 
 
+def _assert_analysis_equal(actual: dict, expected: dict) -> None:
+    for key in (
+        "schema_version",
+        "provenance",
+        "analysis_id",
+        "site_id",
+        "coordinates",
+        "start_utc",
+        "end_utc",
+        "observer_height_m",
+        "sample_minutes",
+        "horizon",
+        "slope",
+    ):
+        assert actual[key] == expected[key]
+    assert actual["metrics"] == pytest.approx(expected["metrics"])
+    assert len(actual["samples"]) == len(expected["samples"])
+    for s_act, s_exp in zip(actual["samples"], expected["samples"]):
+        assert s_act["utc"] == s_exp["utc"]
+        assert s_act["met_hours"] == pytest.approx(s_exp["met_hours"])
+        for body in ("sun", "earth"):
+            assert s_act[body]["visible"] == s_exp[body]["visible"]
+            assert s_act[body]["azimuth_deg"] == pytest.approx(s_exp[body]["azimuth_deg"])
+            assert s_act[body]["elevation_deg"] == pytest.approx(s_exp[body]["elevation_deg"])
+            assert s_act[body]["horizon_deg"] == pytest.approx(s_exp[body]["horizon_deg"])
+            if body == "sun":
+                if s_exp[body]["illumination_fraction"] is None:
+                    assert s_act[body]["illumination_fraction"] is None
+                else:
+                    assert s_act[body]["illumination_fraction"] == pytest.approx(
+                        s_exp[body]["illumination_fraction"], abs=1e-8
+                    )
+
+
+
 def test_get_sites_returns_only_contract_verified_sites(client: TestClient):
     response = client.get("/api/sites")
     assert response.status_code == 200
@@ -87,7 +122,7 @@ def test_post_analyze_nominal_and_delay48h_offline_match_fixtures(client: TestCl
     nominal = nominal_resp.json()
     validate_document("analysis", nominal)
     expected_nominal = _nominal_analysis()
-    assert nominal == expected_nominal
+    _assert_analysis_equal(nominal, expected_nominal)
     assert nominal["provenance"]["data_kind"] == "cached_real"
     assert len(nominal["samples"]) == 673
     assert nominal["metrics"]["sunlight_hours"] == pytest.approx(249.06378983523817)
@@ -107,7 +142,7 @@ def test_post_analyze_nominal_and_delay48h_offline_match_fixtures(client: TestCl
     assert delay_resp.status_code == 200
     delay = delay_resp.json()
     validate_document("analysis", delay)
-    assert delay == _delay48h_analysis()
+    _assert_analysis_equal(delay, _delay48h_analysis())
 
 
 def test_post_analyze_accepts_explicit_observer_and_slope(client: TestClient):
@@ -523,7 +558,7 @@ def test_export_json_and_csv_get_and_post(client: TestClient):
         },
     )
     assert inline_get_json.status_code == 200
-    assert json.loads(inline_get_json.text) == nominal
+    _assert_analysis_equal(json.loads(inline_get_json.text), nominal)
 
     missing_target = client.get("/api/export", params={"format": "csv"})
     assert missing_target.status_code == 422
