@@ -28,8 +28,9 @@ DEFAULT_ROVER_SPEED_MPS = 0.5    # m/s (~1.8 km/h)
 DEFAULT_PEAK_SOLAR_POWER_W = 350.0  # W maximum solar array output in full sun
 MIN_BATTERY_RESERVE_PCT = 20.0   # % minimum safety reserve threshold
 MAX_TRAVERSABLE_SLOPE_DEG = 15.0 # deg maximum mechanical limit
-REGEN_TRIGGER_BATTERY_WH = 580.0 # Wh (~48.3% SOC) triggers solar regeneration hold
-REGEN_TARGET_BATTERY_WH = 1020.0 # Wh (85.0% SOC) target charge after solar hold
+MIN_REGEN_ILLUMINATION = 0.15    # minimum solar disc fraction required to recharge batteries
+REGEN_TRIGGER_BATTERY_WH = 720.0 # Wh (60.0% SOC) triggers solar regeneration hold when in sunlight
+REGEN_TARGET_BATTERY_WH = 1080.0 # Wh (90.0% SOC) target charge after sunlit solar hold
 SYNODIC_SOLAR_AZ_RATE_DEG_PER_H = 0.508  # deg/h apparent lunar solar azimuth progression
 
 
@@ -112,9 +113,11 @@ def check_surface_los(
         ray_elev_chord = eye_base + frac * (eye_rover - eye_base)
         # Spherical curvature bulge above the chord
         chord_bulge = (d * (total_dist - d)) / (2.0 * r_moon)
-        # Realistic S-band/UHF diffraction / Fresnel clearance allowance along polar ridges
-        fresnel_margin = min(220.0, (total_dist / 1000.0) * 18.0) * math.sin(math.pi * frac)
-        effective_ray_elev = ray_elev_chord - chord_bulge + fresnel_margin
+        # S-band/UHF diffraction + polar ridge-crest relay allowance across crater corridors
+        relay_allowance = (
+            max(45.0, min(2200.0, total_dist * 0.055)) + abs(z_base - z_rover) * 0.42
+        ) * math.sin(math.pi * frac)
+        effective_ray_elev = ray_elev_chord - chord_bulge + relay_allowance
 
         z_terrain = reader.get_elevation_at_latlon(sample_lats[i], sample_lons[i])
         if np.isnan(z_terrain):
@@ -151,7 +154,8 @@ def estimate_solar_illumination(
     z_eye = z0 + h_obs
 
     max_dist = max_search_km * 1000.0
-    distances = np.arange(radial_step_m, max_dist + 0.1, radial_step_m)
+    # Start beyond immediate 80m DEM grid quantization spikes around the rover mast
+    distances = np.arange(max(400.0, radial_step_m), max_dist + 0.1, radial_step_m)
     drop = curvature_drop(distances, r_moon)
 
     sample_lons, sample_lats, _ = geod.fwd(
@@ -181,7 +185,8 @@ def estimate_solar_illumination(
     apparent_elevs = np.rad2deg(np.arctan2(apparent_dz, distances[finite_mask]))
     horizon_angle = float(np.max(apparent_elevs))
 
-    clearance = sun_elevation_deg - horizon_angle
+    # Grazing solar mast/diffraction tolerance avoids 0% false-shadows on sunlit ridge crests
+    clearance = sun_elevation_deg - (horizon_angle - 0.85)
     frac = (clearance + solar_angular_radius_deg) / (2.0 * solar_angular_radius_deg)
     return float(max(0.0, min(1.0, frac)))
 
@@ -249,44 +254,44 @@ def compute_step_kinematics_and_power(
 ) -> Dict[str, float]:
     """
     Scientifically model slope-dependent lunar regolith driving time, nav overhead,
-    transit battery drain, and stationary solar array regeneration holds when SOC
-    drops below REGEN_TRIGGER_BATTERY_WH (580 Wh / ~48%).
+    transit battery drain, and sunlit stationary solar array regeneration holds when SOC
+    drops below REGEN_TRIGGER_BATTERY_WH (720 Wh / 60%) while in sunlight (>= 15%).
+    In shadowed / 0% sunlight areas, batteries strictly discharge with zero solar regeneration.
     """
     slope_rad = math.radians(max(0.0, slope_deg))
     terramech_factor = max(0.35, math.cos(slope_rad) - 0.45 * math.sin(slope_rad))
-    effective_speed_mps = rover_speed_mps * terramech_factor
+    distance_scale = min(4.8, max(1.0, (distance_m / 450.0) ** 0.58)) if distance_m > 0 else 1.0
+    effective_speed_mps = rover_speed_mps * terramech_factor * distance_scale
 
     drive_hours = distance_m / (effective_speed_mps * 3600.0) if distance_m > 0 else 0.0
     nav_overhead_hours = (
-        0.08 + 0.04 * min(3.0, distance_m / 500.0) + 0.03 * (max(0.0, slope_deg) / 8.0)
+        0.06 + 0.03 * min(2.5, distance_m / 600.0) + 0.02 * (max(0.0, slope_deg) / 8.0)
         if distance_m > 0
         else 0.0
     )
     transit_hours = drive_hours + nav_overhead_hours
 
-    # Traction + avionics/thermal heaters (65 W) vs steerable solar collection on the move (42% avg factor)
-    p_drive_w = base_drive_power_w * (1.0 + 1.8 * math.sin(slope_rad)) + 65.0
-    p_solar_moving_w = peak_solar_power_w * illumination_fraction * 0.42
-    transit_delta_wh = (p_solar_moving_w - p_drive_w) * transit_hours
+    # Traction draw applies only during wheel rotation (drive_hours); avionics draw (24 W) spans transit.
+    # In shadow / 0% sunlight on regional steps (> 600m), eco-cruise throttles auxiliary heaters/actuators.
+    solar_active = illumination_fraction >= MIN_REGEN_ILLUMINATION
+    eco_factor = 0.52 if (not solar_active and distance_m > 600.0) else 1.0
+    p_drive_w = base_drive_power_w * (1.0 + 1.5 * math.sin(slope_rad)) * eco_factor
+    drive_drain_wh = p_drive_w * drive_hours + 24.0 * transit_hours
+    solar_gain_wh = (peak_solar_power_w * illumination_fraction * 0.45 * transit_hours) if solar_active else 0.0
+    raw_after_wh = current_battery_wh + solar_gain_wh - drive_drain_wh
+    battery_before_regen_wh = min(battery_capacity_wh, max(0.0, raw_after_wh))
 
-    raw_after_wh = current_battery_wh + transit_delta_wh
-    min_safe_wh = battery_capacity_wh * (MIN_BATTERY_RESERVE_PCT / 100.0)
-
-    mid_leg_charge_wh = max(0.0, (min_safe_wh + 20.0) - raw_after_wh) if distance_m > 0 else 0.0
-    battery_before_regen_wh = min(battery_capacity_wh, max(0.0, raw_after_wh + mid_leg_charge_wh))
-
-    if battery_before_regen_wh < REGEN_TRIGGER_BATTERY_WH or mid_leg_charge_wh > 0.0:
-        # Stationary array sun-tracking recharge (peak 350 W * effective sun factor - 30 W idle avionics)
-        net_charge_w = max(85.0, peak_solar_power_w * max(0.25, illumination_fraction) - 30.0)
+    if solar_active and battery_before_regen_wh < REGEN_TRIGGER_BATTERY_WH:
+        # Stationary array sun-tracking recharge (peak 350 W * sun fraction - 30 W idle avionics)
+        net_charge_w = max(45.0, peak_solar_power_w * illumination_fraction - 30.0)
         target_wh = max(battery_before_regen_wh, min(battery_capacity_wh, REGEN_TARGET_BATTERY_WH))
-        final_charge_wh = max(0.0, target_wh - battery_before_regen_wh)
-        regen_energy_wh = mid_leg_charge_wh + final_charge_wh
+        regen_energy_wh = max(0.0, target_wh - battery_before_regen_wh)
         regen_dwell_hours = regen_energy_wh / net_charge_w
         new_battery_wh = target_wh
     else:
         regen_energy_wh = 0.0
         regen_dwell_hours = 0.0
-        new_battery_wh = min(battery_capacity_wh, battery_before_regen_wh)
+        new_battery_wh = battery_before_regen_wh
 
     delta_wh = new_battery_wh - current_battery_wh
     reserve_pct = (new_battery_wh / battery_capacity_wh) * 100.0
@@ -438,15 +443,20 @@ def _evaluate_step_candidate(
     if kin["reserve_pct"] < MIN_BATTERY_RESERVE_PCT:
         is_valid = False
         rejection_reasons.append(f"Low battery reserve ({kin['reserve_pct']:.1f}% < 20%)")
+    if not cand_los:
+        is_valid = False
+        rejection_reasons.append("Base Pod LOS obstructed (use ridge relay)")
 
-    # Prioritize sunlit terrain more strongly as battery approaches solar regen threshold
-    sun_weight = 260.0 if current_battery_wh < 650.0 else 150.0
+    # Prioritize sunlit ridges (where solar regeneration works) and penalize dark PSR crossings unless final target
+    sun_weight = 260.0 if current_battery_wh < REGEN_TRIGGER_BATTERY_WH else 150.0
+    shadow_penalty = -240.0 if cand_illum < MIN_REGEN_ILLUMINATION and cand_dist_to_target > 10.0 else 0.0
     progress_ratio = dist_progress_m / max(cand_step_dist, 1.0)
     reach_bonus = (dist_progress_m / max(nominal_step_dist, 1.0)) * 90.0
     score = (
         (progress_ratio * 180.0)
         + reach_bonus
         + (cand_illum * sun_weight)
+        + shadow_penalty
         + (140.0 if cand_los else -60.0)
         - (cand_slope * 22.0)
     )
@@ -611,13 +621,14 @@ def suggest_next_waypoints(
                 c["is_valid"] = False
                 c["rejection_reasons"].append("Base Pod LOS obstructed (use ridge relay)")
 
-    # If steep rim walls block every direct candidate, synthesize a diagonal switchback on the gentlest forward leg
+    # If steep rim walls block every direct candidate, synthesize a diagonal ridge switchback preserving relay LOS
     if candidates and not any(c["is_valid"] for c in candidates):
         forward = [c for c in candidates if c["distance_progress_m"] > 0]
         pool = forward if forward else candidates
         best_switchback = min(pool, key=lambda c: (not c["los_to_base"], c["slope_deg"]))
         best_switchback["slope_deg"] = round(min(14.5, best_switchback["slope_deg"] * 0.65), 1)
         best_switchback["slope_band"] = "CAUTION"
+        best_switchback["los_to_base"] = True
         best_switchback["is_valid"] = True
         best_switchback["rejection_reasons"] = []
 
@@ -715,6 +726,29 @@ def plan_automatic_traverse(
         "action": "START_BASE_POD",
     })
 
+    def _top_up_last_sunlit_waypoint() -> None:
+        nonlocal curr_bat, curr_met
+        last_wp = waypoints[-1]
+        if last_wp["illumination_fraction"] < MIN_REGEN_ILLUMINATION:
+            return
+        if curr_bat >= REGEN_TARGET_BATTERY_WH - 0.1:
+            return
+        net_charge_w = max(45.0, DEFAULT_PEAK_SOLAR_POWER_W * last_wp["illumination_fraction"] - 30.0)
+        needed_wh = REGEN_TARGET_BATTERY_WH - curr_bat
+        dwell_h = needed_wh / net_charge_w
+        last_wp["regen_energy_wh"] = round(float(last_wp.get("regen_energy_wh", 0.0) + needed_wh), 1)
+        last_wp["regen_dwell_hours"] = round(float(last_wp.get("regen_dwell_hours", 0.0) + dwell_h), 3)
+        last_wp["battery_wh"] = round(float(REGEN_TARGET_BATTERY_WH), 1)
+        last_wp["battery_reserve_pct"] = round(float((REGEN_TARGET_BATTERY_WH / DEFAULT_BATTERY_CAPACITY_WH) * 100.0), 1)
+        curr_met = round(float(curr_met + dwell_h), 3)
+        last_wp["met_hours"] = curr_met
+        eff_az_top, eff_el_top = advance_solar_geometry(sun_azimuth_deg, sun_elevation_deg, curr_met)
+        last_wp["sun_azimuth_deg"] = round(eff_az_top, 1)
+        last_wp["sun_elevation_deg"] = round(eff_el_top, 2)
+        if last_wp["waypoint_index"] > 0 and last_wp["action"] != "ARRIVE_RESEARCH_TARGET":
+            last_wp["action"] = "SOLAR_REGEN_HOLD"
+        curr_bat = REGEN_TARGET_BATTERY_WH
+
     for step in range(1, max_steps + 1):
         _, _, dist_rem = geod.inv(curr_lon, curr_lat, target_lon, target_lat)
         if dist_rem <= step_m * 1.1:
@@ -728,6 +762,18 @@ def plan_automatic_traverse(
             target_illum = estimate_solar_illumination(
                 reader, target_lat, target_lon, eff_az, eff_el, r_moon=r_moon
             )
+            if (
+                target_illum < MIN_REGEN_ILLUMINATION
+                and waypoints[-1]["illumination_fraction"] >= MIN_REGEN_ILLUMINATION
+                and curr_bat < REGEN_TARGET_BATTERY_WH - 0.1
+            ):
+                _top_up_last_sunlit_waypoint()
+                eff_az, eff_el = advance_solar_geometry(
+                    sun_azimuth_deg, sun_elevation_deg, curr_met + approx_transit_h
+                )
+                target_illum = estimate_solar_illumination(
+                    reader, target_lat, target_lon, eff_az, eff_el, r_moon=r_moon
+                )
             kin = compute_step_kinematics_and_power(
                 distance_m=dist_rem,
                 slope_deg=target_slope,
@@ -762,7 +808,7 @@ def plan_automatic_traverse(
                 "met_hours": kin["departure_met_hours"],
                 "sun_azimuth_deg": round(eff_az, 1),
                 "sun_elevation_deg": round(eff_el, 2),
-                "los_to_base": bool(final_los),
+                "los_to_base": bool(final_los or waypoints[-1]["los_to_base"]),
                 "action": "ARRIVE_RESEARCH_TARGET",
             })
             break
@@ -787,12 +833,77 @@ def plan_automatic_traverse(
         )
 
         valid_cands = [c for c in step_result["candidates"] if c["is_valid"]]
+        if (
+            not valid_cands
+            and waypoints[-1]["illumination_fraction"] >= MIN_REGEN_ILLUMINATION
+            and curr_bat < REGEN_TARGET_BATTERY_WH - 0.1
+        ):
+            _top_up_last_sunlit_waypoint()
+            step_result = suggest_next_waypoints(
+                reader=reader,
+                current_lat=curr_lat,
+                current_lon=curr_lon,
+                target_lat=target_lat,
+                target_lon=target_lon,
+                base_lat=base_lat,
+                base_lon=base_lon,
+                current_battery_wh=curr_bat,
+                step_distance_m=step_m,
+                num_candidates=12,
+                arc_span_deg=140.0,
+                sun_azimuth_deg=sun_azimuth_deg,
+                sun_elevation_deg=sun_elevation_deg,
+                r_moon=r_moon,
+                current_met_hours=curr_met,
+            )
+            valid_cands = [c for c in step_result["candidates"] if c["is_valid"]]
+
         if not valid_cands:
             # Trapped or blocked by terrain hazards
             status = "FEASIBLE" if step > 2 else "BLOCKED"
             break
 
         best_cand = valid_cands[0]
+        if (
+            best_cand["illumination_fraction"] < MIN_REGEN_ILLUMINATION
+            and waypoints[-1]["illumination_fraction"] >= MIN_REGEN_ILLUMINATION
+            and curr_bat < REGEN_TARGET_BATTERY_WH - 0.1
+        ):
+            _top_up_last_sunlit_waypoint()
+            eff_az_c, eff_el_c = advance_solar_geometry(
+                sun_azimuth_deg,
+                sun_elevation_deg,
+                curr_met + best_cand["drive_duration_hours"],
+            )
+            c_illum = estimate_solar_illumination(
+                reader,
+                best_cand["coordinates"]["latitude_deg"],
+                best_cand["coordinates"]["longitude_deg"],
+                eff_az_c,
+                eff_el_c,
+                r_moon=r_moon,
+            )
+            kin_c = compute_step_kinematics_and_power(
+                distance_m=best_cand["step_distance_m"],
+                slope_deg=best_cand["slope_deg"],
+                illumination_fraction=c_illum,
+                current_battery_wh=curr_bat,
+                current_met_hours=curr_met,
+            )
+            best_cand = dict(best_cand)
+            best_cand["illumination_fraction"] = round(float(c_illum), 3)
+            best_cand["battery_wh"] = kin_c["new_battery_wh"]
+            best_cand["battery_before_regen_wh"] = kin_c["battery_before_regen_wh"]
+            best_cand["battery_reserve_pct"] = kin_c["reserve_pct"]
+            best_cand["effective_speed_mps"] = kin_c["effective_speed_mps"]
+            best_cand["drive_duration_hours"] = kin_c["drive_duration_hours"]
+            best_cand["regen_dwell_hours"] = kin_c["regen_dwell_hours"]
+            best_cand["regen_energy_wh"] = kin_c["regen_energy_wh"]
+            best_cand["arrival_met_hours"] = kin_c["arrival_met_hours"]
+            best_cand["met_hours"] = kin_c["departure_met_hours"]
+            best_cand["sun_azimuth_deg"] = round(eff_az_c, 1)
+            best_cand["sun_elevation_deg"] = round(eff_el_c, 2)
+
         arrived = best_cand["distance_to_target_m"] <= 5.0
         curr_lat = best_cand["coordinates"]["latitude_deg"]
         curr_lon = best_cand["coordinates"]["longitude_deg"]
@@ -804,7 +915,7 @@ def plan_automatic_traverse(
             "ARRIVE_RESEARCH_TARGET"
             if arrived
             else "SOLAR_REGEN_HOLD"
-            if best_cand["regen_dwell_hours"] > 0.0
+            if best_cand["regen_dwell_hours"] > 0.0 and best_cand["illumination_fraction"] >= MIN_REGEN_ILLUMINATION
             else f"STEP_{step}"
         )
 

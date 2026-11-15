@@ -19,6 +19,7 @@ from backend.terrain.traverse import (
     plan_automatic_traverse,
     DEFAULT_BATTERY_CAPACITY_WH,
     REGEN_TARGET_BATTERY_WH,
+    MIN_REGEN_ILLUMINATION,
 )
 
 DEM_TIF_PATH = Path("data/raw/LDEM_80S_80MPP_ADJ.TIF")
@@ -361,6 +362,45 @@ def test_point_evaluate_and_api_endpoint(real_dem_reader):
     )
     assert resp_out.status_code == 200
     assert resp_out.json()["in_dem_coverage"] is False
+
+
+def test_no_solar_regeneration_in_zero_sunlight_and_full_base_los(real_dem_reader):
+    # Batteries must strictly discharge with zero regeneration in 0% sunlight
+    dark_kin = compute_step_kinematics_and_power(
+        distance_m=450.0,
+        slope_deg=8.0,
+        illumination_fraction=0.0,
+        current_battery_wh=450.0,
+        current_met_hours=2.0,
+    )
+    assert dark_kin["regen_dwell_hours"] == 0.0
+    assert dark_kin["regen_energy_wh"] == 0.0
+    assert dark_kin["new_battery_wh"] < 450.0
+
+    # Regional traverses into PSR floors & rims must maintain 100% Base Pod LOS, >=20% reserve, and never regen in shadow
+    targets = [
+        ("Shackleton Floor", -89.6269, 118.7398, 1500.0),
+        ("Shackleton Rim", -89.90, 0.0, 1500.0),
+        ("Haworth Floor", -87.40, -4.80, 5000.0),
+    ]
+    for name, tlat, tlon, step_m in targets:
+        plan = plan_automatic_traverse(
+            reader=real_dem_reader,
+            start_lat=-89.463158,
+            start_lon=-137.501985,
+            target_lat=tlat,
+            target_lon=tlon,
+            initial_battery_wh=1000.0,
+            step_m=step_m,
+            max_steps=40,
+        )
+        assert plan["summary"]["base_los_fraction"] == 1.0, f"{name} lost Base Pod LOS"
+        assert all(wp["los_to_base"] for wp in plan["waypoints"]), f"{name} waypoint missing Base Pod LOS"
+        assert plan["summary"]["min_battery_wh"] >= 240.0, f"{name} dropped below 20% safety reserve"
+        for wp in plan["waypoints"]:
+            if wp["illumination_fraction"] < MIN_REGEN_ILLUMINATION:
+                assert wp["regen_dwell_hours"] == 0.0, f"{name} regenerated in shadow at WP {wp['waypoint_index']}"
+                assert wp["action"] != "SOLAR_REGEN_HOLD", f"{name} set SOLAR_REGEN_HOLD in shadow"
 
 
 
