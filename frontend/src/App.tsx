@@ -475,16 +475,19 @@ export function App() {
       return
     }
     const timer = window.setTimeout(() => {
-      const stepH = Math.max(0.05, maxRoverMetHours / 90)
+      const stepH =
+        traverseMode === 'manual'
+          ? Math.max(0.01, maxRoverMetHours / 45)
+          : Math.max(0.02, maxRoverMetHours / 75)
       const nextH = Math.min(maxRoverMetHours, roverSimHours + stepH)
       setRoverSimHours(nextH)
       if (samples.length > 0) {
         setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(nextH * 2))))
       }
       if (nextH >= maxRoverMetHours) setIsRoverPlaying(false)
-    }, 110)
+    }, 85)
     return () => window.clearTimeout(timer)
-  }, [isRoverPlaying, roverSimHours, maxRoverMetHours, samples.length, lastSampleIdx])
+  }, [isRoverPlaying, roverSimHours, maxRoverMetHours, samples.length, lastSampleIdx, traverseMode])
 
   // Filtered Search Options
   const parsedCoords = useMemo(() => parseCoordinateQuery(searchQuery), [searchQuery])
@@ -757,6 +760,12 @@ export function App() {
         if (seq !== traverseRequestSeq.current) return
         setTraverseAutoResult(res)
         setTraverseWaypoints(res.waypoints)
+        if (res.waypoints.length > 1) {
+          setPlaying(false)
+          setSampleIndex(0)
+          setRoverSimHours(0)
+          setIsRoverPlaying(true)
+        }
       })
       .finally(() => {
         if (seq === traverseRequestSeq.current) setTraverseLoading(false)
@@ -771,7 +780,8 @@ export function App() {
   const handleSelectManualCandidate = useCallback(
     (cand: TraverseManualCandidate) => {
       if (!cand.is_valid || traverseMode !== 'manual') return
-      const nextMet = cand.met_hours ?? ((latestWaypoint?.met_hours ?? 0) + (cand.drive_duration_hours ?? 0.25))
+      const prevMet = latestWaypoint?.met_hours ?? 0
+      const nextMet = cand.met_hours ?? (prevMet + (cand.drive_duration_hours ?? 0.25))
       const hasRegen = (cand.regen_dwell_hours ?? 0) > 0
       setTraverseWaypoints(prev => {
         const last = prev[prev.length - 1]
@@ -803,11 +813,11 @@ export function App() {
           },
         ]
       })
-      setIsRoverPlaying(false)
       setPlaying(false)
-      setRoverSimHours(nextMet)
+      setRoverSimHours(prevMet)
+      setIsRoverPlaying(true)
       if (samples.length > 0) {
-        setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(nextMet * 2))))
+        setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(prevMet * 2))))
       }
     },
     [traverseMode, latestWaypoint, samples.length, lastSampleIdx],
@@ -858,11 +868,11 @@ export function App() {
         action: 'ARRIVE_RESEARCH_TARGET',
       },
     ])
-    setIsRoverPlaying(false)
     setPlaying(false)
-    setRoverSimHours(kin.departureMetHours)
+    setRoverSimHours(prevMet)
+    setIsRoverPlaying(true)
     if (samples.length > 0) {
-      setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(kin.departureMetHours * 2))))
+      setSampleIndex(Math.min(lastSampleIdx, Math.max(0, Math.round(prevMet * 2))))
     }
   }, [workspace, traverseTarget, latestWaypoint, landingSunAz, landingSunEl, samples.length, lastSampleIdx])
 
@@ -2736,11 +2746,11 @@ export function App() {
           />
 
           <span className="text-[10px] font-mono-tech text-slate-300 tabular-nums shrink-0 hidden sm:inline">
-            +{currentSample.met_hours.toFixed(1)}h ·{' '}
+            +{(traverseOpen && maxRoverMetHours > 0 ? roverSimHours : currentSample.met_hours).toFixed(2)}h ·{' '}
             {currentSample.utc.replace('T', ' ').replace('Z', '').slice(0, 16)} UTC
           </span>
           <span className="text-[10px] font-mono-tech text-slate-300 tabular-nums shrink-0 sm:hidden">
-            +{currentSample.met_hours.toFixed(1)}h
+            +{(traverseOpen && maxRoverMetHours > 0 ? roverSimHours : currentSample.met_hours).toFixed(2)}h
           </span>
 
           <button
