@@ -357,7 +357,7 @@ export function App() {
   }, [workspace?.effectiveSlopeBand])
 
   return (
-    <div className="relative w-full h-full overflow-hidden bg-[#050507] text-slate-100 select-none">
+    <div className="lunar-explorer relative w-full h-full overflow-hidden text-slate-100 select-none">
       {/* Dual-State 3D WebGL Moon Globe <-> Verified NASA LOLA 129x129 DEM Surface */}
       <LunarStage3D
         catalogSites={CATALOG_SITES}
@@ -384,7 +384,7 @@ export function App() {
         ref={searchWrapperRef}
         className="fixed top-4 sm:top-6 left-1/2 -translate-x-1/2 z-30 w-[94vw] max-w-[520px]"
       >
-        <div className="glass-hud rounded-full px-3.5 sm:px-4 py-2 flex items-center gap-2 shadow-[0_12px_40px_rgba(0,0,0,0.65)] transition-colors focus-within:border-white/25">
+        <div className="glass-hud lunar-search-glass rounded-full px-3.5 sm:px-4 py-2 flex items-center gap-2 shadow-[0_12px_40px_rgba(0,0,0,0.65)] transition-colors focus-within:border-white/25">
           <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
 
           <input
@@ -680,6 +680,7 @@ export function App() {
                     <button
                       key={tab.id}
                       type="button"
+                      aria-pressed={activeTab === tab.id}
                       onClick={() => setActiveTab(tab.id)}
                       className={`px-2.5 py-0.5 rounded-full text-[9px] font-mono-tech tracking-[0.14em] uppercase transition ${
                         activeTab === tab.id
@@ -918,7 +919,7 @@ export function App() {
                     </div>
                   </div>
 
-                  <div className="relative w-full h-[94px] sm:h-[106px] rounded-xl bg-black/45 border border-white/[0.06] overflow-hidden">
+                  <div className="relative w-full h-[94px] sm:h-[106px] rounded-xl lunar-chart-glass border overflow-hidden">
                     <HorizonProfileCanvas
                       horizon={workspace.analysis.horizon}
                       currentSample={currentSample}
@@ -1101,6 +1102,7 @@ export function App() {
                     <button
                       key={s}
                       type="button"
+                      aria-pressed={speed === s}
                       onClick={() => setSpeed(s)}
                       className={`px-1.5 py-0.5 rounded-full text-[9px] font-mono-tech transition ${
                         speed === s ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-slate-200'

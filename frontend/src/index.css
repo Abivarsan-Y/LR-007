@@ -178,3 +178,100 @@ input[type="range"].hud-range::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.16);
   border-radius: 999px;
 }
+
+/* Glass finish for the existing lunar explorer. */
+:root {
+  --ops-ink: #eef5ff;
+  --ops-muted: #a6b9d2;
+  --ops-ice: #b8ddff;
+  --ops-edge: rgb(172 208 255 / .22);
+  --ops-ease: cubic-bezier(.22, .72, .26, 1);
+}
+
+/* The transparent WebGL canvas keeps the galaxy behind the Moon and terrain. */
+.lunar-explorer {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 47% 49%, #142a4d 0%, transparent 55%),
+    radial-gradient(ellipse at 86% 20%, #131b3a 0%, transparent 47%),
+    radial-gradient(ellipse at 16% 77%, #0e2343 0%, transparent 49%),
+    #040811;
+}
+.lunar-explorer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 52% 38%, #407fcc19, transparent 62%),
+    radial-gradient(ellipse at 35% 68%, #2c59bf20, transparent 64%),
+    radial-gradient(ellipse at 77% 23%, #5d63ba12, transparent 45%);
+}
+
+.lunar-explorer, .lunar-explorer .font-mono-tech {
+  font-family: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  letter-spacing: .035em;
+}
+.lunar-explorer h1 { font-weight: 650; letter-spacing: .055em; }
+.lunar-explorer .text-slate-500,
+.lunar-explorer .text-slate-400 { color: var(--ops-muted); }
+.lunar-explorer .text-slate-600 { color: #8398b5; }
+.lunar-explorer input::placeholder { color: #9cb0cc; }
+
+.lunar-explorer .glass-hud {
+  color: var(--ops-ink);
+  background:
+    radial-gradient(ellipse at 13% 0%, rgb(133 191 255 / .20), transparent 55%),
+    radial-gradient(ellipse at 100% 100%, rgb(101 114 235 / .13), transparent 58%),
+    linear-gradient(149deg, rgb(31 55 84 / .70), rgb(8 17 33 / .80) 65%, rgb(18 29 55 / .73));
+  border: 1px solid var(--ops-edge);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+  box-shadow: inset 0 1px 0 rgb(230 246 255 / .22), inset 0 -1px 0 rgb(108 148 219 / .11),
+    0 12px 36px rgb(2 7 18 / .50);
+}
+
+.lunar-explorer button { cursor: pointer; }
+.lunar-explorer button:disabled { cursor: not-allowed; }
+.lunar-explorer button, .lunar-explorer .lunar-search-glass {
+  transition: background-color 180ms var(--ops-ease), border-color 180ms var(--ops-ease),
+    box-shadow 180ms var(--ops-ease), color 180ms var(--ops-ease), scale 150ms var(--ops-ease);
+}
+.lunar-explorer button:is(.rounded-full, .rounded-xl, .rounded) {
+  background-image: linear-gradient(158deg, rgb(204 227 255 / .08), transparent 73%);
+}
+.lunar-explorer button[aria-pressed="true"] {
+  border-color: rgb(167 213 255 / .42);
+  box-shadow: inset 0 1px rgb(230 247 255 / .22), 0 0 14px rgb(119 180 255 / .13);
+}
+@media (hover: hover) {
+  .lunar-explorer button:not(:disabled):hover {
+    border-color: rgb(171 217 255 / .46);
+    box-shadow: inset 0 1px rgb(218 242 255 / .14), 0 0 16px rgb(105 169 255 / .14);
+  }
+}
+.lunar-explorer button:not(:disabled):active { scale: .965; }
+.lunar-explorer :is(button, input, svg[tabindex]):focus-visible {
+  outline: 2px solid var(--ops-ice);
+  outline-offset: 3px;
+}
+.lunar-explorer .lunar-search-glass:focus-within {
+  border-color: rgb(177 222 255 / .55);
+  box-shadow: inset 0 1px rgb(234 249 255 / .23), 0 0 0 3px rgb(110 173 255 / .14), 0 12px 36px #02071280;
+}
+.lunar-explorer input.hud-range::-webkit-slider-runnable-track {
+  background: linear-gradient(90deg, #628eb8, #8294be);
+}
+.lunar-explorer input.hud-range::-moz-range-track {
+  background: linear-gradient(90deg, #628eb8, #8294be);
+}
+.lunar-explorer .lunar-chart-glass {
+  background: linear-gradient(155deg, rgb(18 31 51 / .82), rgb(6 13 27 / .87));
+  border-color: rgb(159 206 255 / .16);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lunar-explorer button, .lunar-explorer .glass-hud, .lunar-explorer .hud-range::-webkit-slider-thumb {
+    transition: none;
+  }
+  .lunar-explorer button:not(:disabled):active { scale: 1; }
+}

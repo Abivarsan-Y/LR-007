@@ -9,6 +9,8 @@ import type {
   DecodedDemSiteTerrain,
 } from '../../api/types'
 import { classifySlopeBand, normalizeLongitudeDeg } from '../../api/client'
+import moonColorUrl from './textures/lroc_color_2k.jpg'
+import moonReliefUrl from './textures/ldem_3_8bit.jpg'
 
 export type TerrainOverlayMode = 'albedo' | 'slope'
 
@@ -387,33 +389,59 @@ export function LunarStage3D({
       0.012,
       120,
     )
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' })
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
     renderer.setSize(container.clientWidth, container.clientHeight)
-    renderer.setClearColor(0x050507, 1)
+    renderer.setClearColor(0x040811, 0)
     container.appendChild(renderer.domElement)
 
-    // Starfield
-    const starGeo = new THREE.BufferGeometry()
-    const starCount = 520
-    const starPos = new Float32Array(starCount * 3)
-    for (let i = 0; i < starCount; i++) {
-      const theta = Math.random() * Math.PI * 2
-      const phi = Math.acos(2 * Math.random() - 1)
-      const r = 36 + Math.random() * 16
-      starPos[i * 3] = r * Math.sin(phi) * Math.cos(theta)
-      starPos[i * 3 + 1] = r * Math.cos(phi)
-      starPos[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta)
+    // A soft, circular sprite keeps larger stars from looking like square pixels.
+    const spriteSize = 32
+    const spritePixels = new Uint8Array(spriteSize * spriteSize * 4)
+    for (let y = 0; y < spriteSize; y++) {
+      for (let x = 0; x < spriteSize; x++) {
+        const radius = Math.hypot(
+          (x + 0.5) / spriteSize * 2 - 1,
+          (y + 0.5) / spriteSize * 2 - 1,
+        )
+        const offset = (y * spriteSize + x) * 4
+        spritePixels.fill(255, offset, offset + 3)
+        spritePixels[offset + 3] = Math.round(255 * Math.max(0, 1 - radius * radius) ** 2)
+      }
     }
-    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
-    const starMat = new THREE.PointsMaterial({
-      color: 0xa5b4fc,
-      size: 0.055,
-      transparent: true,
-      opacity: 0.36,
+    const starSprite = new THREE.DataTexture(spritePixels, spriteSize, spriteSize)
+    starSprite.magFilter = THREE.LinearFilter
+    starSprite.minFilter = THREE.LinearFilter
+    starSprite.needsUpdate = true
+
+    const starLayers = [
+      { count: 1900, size: 0.065, color: 0xc5d9fa, opacity: 0.44 },
+      { count: 350, size: 0.16, color: 0xdceaff, opacity: 0.70 },
+      { count: 90, size: 0.34, color: 0xfff2dc, opacity: 0.88 },
+    ].map(({ count, size, color, opacity }) => {
+      const positions = new Float32Array(count * 3)
+      for (let i = 0; i < count; i++) {
+        const theta = Math.random() * Math.PI * 2
+        const phi = Math.acos(2 * Math.random() - 1)
+        const radius = 36 + Math.random() * 16
+        positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta)
+        positions[i * 3 + 1] = radius * Math.cos(phi)
+        positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta)
+      }
+      const geometry = new THREE.BufferGeometry()
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+      const material = new THREE.PointsMaterial({
+        map: starSprite,
+        color,
+        size,
+        opacity,
+        transparent: true,
+        depthWrite: false,
+      })
+      const points = new THREE.Points(geometry, material)
+      scene.add(points)
+      return points
     })
-    const stars = new THREE.Points(starGeo, starMat)
-    scene.add(stars)
 
     // Balanced studio + grazing lunar lighting (prevents pitch-black crater ink blotches)
     const sunLight = new THREE.DirectionalLight(0xfffcf5, 1.55)
@@ -432,12 +460,15 @@ export function LunarStage3D({
 
     // STATE 1 MESH: Smooth Indexed High-Res Orbital Lunar Globe (~48k triangles welded cleanly)
     const rawMoonGeo = new THREE.IcosahedronGeometry(MOON_RADIUS, 48)
+    // The NASA maps put longitude 0 at the center, which is +Z in this scene.
+    rawMoonGeo.rotateY(Math.PI / 2)
+    const moonUvs = rawMoonGeo.attributes.uv.clone()
     rawMoonGeo.deleteAttribute('normal')
     rawMoonGeo.deleteAttribute('uv')
-    const moonGeo = mergeVertices(rawMoonGeo, 1e-5)
+    const weldedMoonGeo = mergeVertices(rawMoonGeo, 1e-5)
     rawMoonGeo.dispose()
 
-    const posAttr = moonGeo.attributes.position
+    const posAttr = weldedMoonGeo.attributes.position
     const moonColors = new Float32Array(posAttr.count * 3)
     const vTemp = new THREE.Vector3()
     for (let i = 0; i < posAttr.count; i++) {
@@ -454,8 +485,12 @@ export function LunarStage3D({
       moonColors[i * 3 + 1] = regolith * 0.97
       moonColors[i * 3 + 2] = regolith * 1.01
     }
-    moonGeo.setAttribute('color', new THREE.BufferAttribute(moonColors, 3))
-    moonGeo.computeVertexNormals()
+    weldedMoonGeo.setAttribute('color', new THREE.BufferAttribute(moonColors, 3))
+    weldedMoonGeo.computeVertexNormals()
+    // Keep smooth normals across the antimeridian but separate its UVs per face.
+    const moonGeo = weldedMoonGeo.toNonIndexed()
+    moonGeo.setAttribute('uv', moonUvs)
+    weldedMoonGeo.dispose()
     const moonMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.92,
@@ -465,6 +500,25 @@ export function LunarStage3D({
     })
     const moonMesh = new THREE.Mesh(moonGeo, moonMat)
     scene.add(moonMesh)
+
+    let texturesDisposed = false
+    const moonTextureLoader = new THREE.TextureLoader()
+    const moonColor = moonTextureLoader.load(moonColorUrl, texture => {
+      if (texturesDisposed) return
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.wrapS = THREE.RepeatWrapping
+      texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy())
+      moonMat.map = texture
+      moonMat.vertexColors = false
+      moonMat.needsUpdate = true
+    })
+    const moonRelief = moonTextureLoader.load(moonReliefUrl, texture => {
+      if (texturesDisposed) return
+      texture.wrapS = THREE.RepeatWrapping
+      moonMat.bumpMap = texture
+      moonMat.bumpScale = 0.016
+      moonMat.needsUpdate = true
+    })
 
     // Polar Coordinate Graticule
     const graticuleGroup = new THREE.Group()
@@ -1341,9 +1395,15 @@ export function LunarStage3D({
       domElem.removeEventListener('touchend', onTouchEnd)
       window.removeEventListener('resize', onResize)
 
-      starGeo.dispose()
-      starMat.dispose()
+      starLayers.forEach(({ geometry, material }) => {
+        geometry.dispose()
+        material.dispose()
+      })
+      starSprite.dispose()
       moonGeo.dispose()
+      texturesDisposed = true
+      moonColor.dispose()
+      moonRelief.dispose()
       moonMat.dispose()
       graticuleGeos.forEach(g => g.dispose())
       lineMatSubtle.dispose()
