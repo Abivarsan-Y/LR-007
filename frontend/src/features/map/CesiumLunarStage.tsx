@@ -12,8 +12,8 @@ import type {
   TraverseResearchTargetOption,
   TraverseWaypoint,
 } from '../../api/types'
-import { sampleDemAtLatLon } from '../../api/client'
-import { RADIUS, WMS_URL, offsetCoordinate, directionEnu, mapImageUrl, observerMatches, isCanonicalTerrain } from './lunar.mjs'
+import { sampleDemAtLatLon, sphericalDistanceAndBearing } from '../../api/client'
+import { RADIUS, WMS_URL, offsetCoordinate, directionEnu, observerMatches, isCanonicalTerrain } from './lunar.mjs'
 import canonical from '../../../../backend/tests/fixtures/science/site01/site.json'
 
 export type TerrainOverlayMode = 'albedo' | 'slope'
@@ -53,7 +53,7 @@ interface Props {
 }
 interface Runtime {
   viewer: C.Viewer; patch: C.Primitive | null; wire: C.PolylineCollection | null
-  imageMaterial: C.Material | null; bounds: C.BoundingSphere | null; local: boolean
+  bounds: C.BoundingSphere | null; local: boolean
   rays: C.Entity[]; target: C.Entity | null; catalog: C.Entity[]; traverse: C.Entity[]; provider: C.WebMapServiceImageryProvider
   patchCentre: C.Cartesian3 | null
 }
@@ -122,51 +122,330 @@ function terrainPosition(
     : elevOffsetM
   return position(lon, lat, height)
 }
+function getEffectiveVerticalScale(dem: DecodedDemSiteTerrain | null, userScale: number): number {
+  if (!dem) return userScale
+  const span = Math.max(80, dem.maxRelY - dem.minRelY)
+  const boost = Math.max(1.35, Math.min(2.8, 650 / span))
+  return userScale * boost
+}
+
 function discardPatch(rt: Runtime) {
   if (rt.patch) rt.viewer.scene.primitives.remove(rt.patch)
   if (rt.wire) rt.viewer.scene.primitives.remove(rt.wire)
   rt.patch=null;rt.wire=null;rt.bounds=null;rt.patchCentre=null
 }
+
 function makePatch(rt: Runtime, dem: DecodedDemSiteTerrain, scale: number, slope: boolean) {
   discardPatch(rt)
-  const {metadata,indices}=dem, origin=metadata.coordinates, count=metadata.width*metadata.height
-  const vertices=new Float64Array(count*3),normals=new Float32Array(count*3),uv=new Float32Array(count*2),colors=new Uint8Array(count*4)
-  const locations:{lat:number;lon:number}[]=[]
-  let west=Infinity,east=-Infinity,south=Infinity,north=-Infinity
-  for(let i=0;i<count;i++){
-    const loc=offsetCoordinate(origin.latitude_deg,origin.longitude_deg,dem.positions[i*3],-dem.positions[i*3+2])
-    locations.push(loc);west=Math.min(west,loc.lon);east=Math.max(east,loc.lon);south=Math.min(south,loc.lat);north=Math.max(north,loc.lat)
-    const p=position(loc.lon,loc.lat,origin.elevation_m+dem.positions[i*3+1]*scale)
-    vertices.set([p.x,p.y,p.z],i*3)
-    const normal=MOON.geodeticSurfaceNormal(p,new C.Cartesian3());normals.set([normal.x,normal.y,normal.z],i*3)
-    const angle=dem.slopeDegPerVertex[i]
-    const color=!Number.isFinite(angle)?C.Color.SLATEGRAY:angle<8?C.Color.fromCssColorString('#3eaa89'):angle<=15?C.Color.fromCssColorString('#d6b06b'):C.Color.fromCssColorString('#d67878')
-    colors.set(color.toBytes(),i*4)
+  const { metadata, indices } = dem
+  const origin = metadata.coordinates
+  const { width, height, spacing_m: spacing } = metadata
+  const coreCount = width * height
+  const coreValid = new Uint8Array(coreCount)
+  for (let i = 0; i < indices.length; i++) {
+    const idx = indices[i]
+    if (idx < coreCount) coreValid[idx] = 1
   }
-  for(let i=0;i<count;i++){uv[i*2]=(locations[i].lon-west)/(east-west);uv[i*2+1]=(locations[i].lat-south)/(north-south)}
-  const geometry=new C.Geometry({attributes:Object.assign(new C.GeometryAttributes(),{
-    position:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.DOUBLE,componentsPerAttribute:3,values:vertices}),
-    normal:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.FLOAT,componentsPerAttribute:3,values:normals}),
-    st:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.FLOAT,componentsPerAttribute:2,values:uv}),
-    color:new C.GeometryAttribute({componentDatatype:C.ComponentDatatype.UNSIGNED_BYTE,componentsPerAttribute:4,normalize:true,values:colors}),
-  }),indices,primitiveType:C.PrimitiveType.TRIANGLES,boundingSphere:C.BoundingSphere.fromVertices(vertices)})
-  rt.bounds=geometry.boundingSphere ?? null
-  rt.patchCentre=position(origin.longitude_deg,origin.latitude_deg,origin.elevation_m)
-  rt.imageMaterial=C.Material.fromType('Image',{image:mapImageUrl([west,south,east,north])})
-  const appearance=slope?new C.PerInstanceColorAppearance({flat:true,translucent:false,closed:false}):new C.MaterialAppearance({material:rt.imageMaterial,flat:true,faceForward:true,translucent:false})
-  rt.patch=rt.viewer.scene.primitives.add(new C.Primitive({geometryInstances:new C.GeometryInstance({geometry}),appearance,asynchronous:false}))
-  const valid=new Set(indices),wire=new C.PolylineCollection()
-  for(let fixed=0;fixed<metadata.width;fixed+=4)for(const column of [false,true]){
-    let segment:C.Cartesian3[]=[]
-    const flush=()=>{if(segment.length>1)wire.add({positions:segment,width:1,material:C.Material.fromType('Color',{color:C.Color.fromCssColorString('#9bd8d0')})});segment=[]}
-    for(let moving=0;moving<metadata.width;moving++){
-      const i=column?moving*metadata.width+fixed:fixed*metadata.width+moving
-      if(!valid.has(i)){flush();continue}
-      segment.push(position(locations[i].lon,locations[i].lat,origin.elevation_m+dem.positions[i*3+1]*scale+.5))
+
+  let sumRelY = 0
+  let validCoreCount = 0
+  for (let i = 0; i < coreCount; i++) {
+    if (!coreValid[i]) continue
+    sumRelY += dem.positions[i * 3 + 1]
+    validCoreCount++
+  }
+  const meanRelY = validCoreCount > 0 ? sumRelY / validCoreCount : 0
+  const elevSpan = Math.max(1.0, dem.maxRelY - dem.minRelY)
+  const contourStep = Math.max(10, Math.round(elevSpan / 10))
+
+  const SKIRT_RINGS = 14
+  const extW = width + 2 * SKIRT_RINGS
+  const extH = height + 2 * SKIRT_RINGS
+  const totalCount = extW * extH
+
+  const eastArr = new Float64Array(totalCount)
+  const northArr = new Float64Array(totalCount)
+  const relYArr = new Float64Array(totalCount)
+  const inCoreArr = new Uint8Array(totalCount)
+  const validMask = new Uint8Array(totalCount)
+  const skirtRadialArr = new Float32Array(totalCount)
+  const coreClampedIdx = new Uint32Array(totalCount)
+  const locations: { lat: number; lon: number }[] = new Array(totalCount)
+
+  const extVertices = new Float64Array(totalCount * 3)
+  const coreVertices = new Float64Array(coreCount * 3)
+  const normals = new Float32Array(totalCount * 3)
+  const colors = new Uint8Array(totalCount * 4)
+
+  const skirtOffset = (k: number) => 70 * k + 18 * k * k
+  let corePtr = 0
+
+  for (let erow = 0; erow < extH; erow++) {
+    const crow = erow - SKIRT_RINGS
+    const clampedR = Math.max(0, Math.min(height - 1, crow))
+    const drOut = crow < 0 ? -crow : crow >= height ? crow - (height - 1) : 0
+    const northSign = crow < 0 ? 1 : crow >= height ? -1 : 0
+    for (let ecol = 0; ecol < extW; ecol++) {
+      const eIdx = erow * extW + ecol
+      const ccol = ecol - SKIRT_RINGS
+      const clampedC = Math.max(0, Math.min(width - 1, ccol))
+      const dcOut = ccol < 0 ? -ccol : ccol >= width ? ccol - (width - 1) : 0
+      const eastSign = ccol < 0 ? -1 : ccol >= width ? 1 : 0
+
+      const cIdx = clampedR * width + clampedC
+      coreClampedIdx[eIdx] = cIdx
+      const inCore = crow >= 0 && crow < height && ccol >= 0 && ccol < width
+      inCoreArr[eIdx] = inCore ? 1 : 0
+      validMask[eIdx] = coreValid[cIdx]
+
+      let eastM: number
+      let northM: number
+      let relY: number
+      let skirtRadial = 0
+
+      if (inCore) {
+        eastM = dem.positions[cIdx * 3]
+        northM = -dem.positions[cIdx * 3 + 2]
+        relY = dem.positions[cIdx * 3 + 1]
+      } else {
+        const edgeEast = (clampedC - (width - 1) / 2) * spacing
+        const edgeNorth = -((clampedR - (height - 1) / 2) * spacing)
+        eastM = edgeEast + (dcOut > 0 ? eastSign * skirtOffset(dcOut) : 0)
+        northM = edgeNorth + (drOut > 0 ? northSign * skirtOffset(drOut) : 0)
+
+        const edgeRelY = dem.positions[cIdx * 3 + 1]
+        skirtRadial = Math.min(1, Math.hypot(dcOut, drOut) / SKIRT_RINGS)
+        const sT = skirtRadial * skirtRadial * (3 - 2 * skirtRadial)
+        const macroWave =
+          Math.sin(eastM * 0.0014 + northM * 0.0009) * 0.5 +
+          Math.cos(eastM * 0.0007 - northM * 0.0016) * 0.5
+        const mesoCrater =
+          Math.sin(eastM * 0.0038) * Math.cos(northM * 0.0034) * 0.5 +
+          Math.sin((eastM - northM) * 0.0029) * 0.35
+        const targetSkirtRelY =
+          meanRelY * 0.55 + elevSpan * 0.16 * macroWave + elevSpan * 0.09 * mesoCrater
+        relY = edgeRelY * (1 - sT) + targetSkirtRelY * sT
+      }
+
+      eastArr[eIdx] = eastM
+      northArr[eIdx] = northM
+      relYArr[eIdx] = relY
+      skirtRadialArr[eIdx] = skirtRadial
+
+      const loc = offsetCoordinate(origin.latitude_deg, origin.longitude_deg, eastM, northM)
+      locations[eIdx] = loc
+      const p = position(loc.lon, loc.lat, origin.elevation_m + relY * scale)
+      extVertices.set([p.x, p.y, p.z], eIdx * 3)
+      if (inCore) {
+        coreVertices.set([p.x, p.y, p.z], corePtr * 3)
+        corePtr++
+      }
+      const normal = MOON.geodeticSurfaceNormal(p, new C.Cartesian3())
+      normals.set([normal.x, normal.y, normal.z], eIdx * 3)
     }
-    flush()
   }
-  rt.wire=rt.viewer.scene.primitives.add(wire)
+
+  // Primary NW low-angle polar Sun + secondary ESE earthshine fill
+  const sunAz = (315 * Math.PI) / 180
+  const sunAlt = (26 * Math.PI) / 180
+  const sunLx = Math.sin(sunAz) * Math.cos(sunAlt)
+  const sunLy = Math.cos(sunAz) * Math.cos(sunAlt)
+  const sunLz = Math.sin(sunAlt)
+
+  const fillAz = (115 * Math.PI) / 180
+  const fillAlt = (18 * Math.PI) / 180
+  const fillLx = Math.sin(fillAz) * Math.cos(fillAlt)
+  const fillLy = Math.cos(fillAz) * Math.cos(fillAlt)
+  const fillLz = Math.sin(fillAlt)
+
+  const normalReliefMult = Math.max(2.6, scale * 1.45)
+
+  for (let erow = 0; erow < extH; erow++) {
+    const rN = Math.max(0, erow - 1)
+    const rS = Math.min(extH - 1, erow + 1)
+    for (let ecol = 0; ecol < extW; ecol++) {
+      const eIdx = erow * extW + ecol
+      const cW = Math.max(0, ecol - 1)
+      const cE = Math.min(extW - 1, ecol + 1)
+
+      const idxW = erow * extW + cW
+      const idxE = erow * extW + cE
+      const idxN = rN * extW + ecol
+      const idxS = rS * extW + ecol
+
+      const dx = Math.max(1, eastArr[idxE] - eastArr[idxW])
+      const dy = Math.max(1, northArr[idxN] - northArr[idxS])
+      const dzDx = validMask[idxW] && validMask[idxE] ? ((relYArr[idxE] - relYArr[idxW]) * normalReliefMult) / dx : 0
+      const dzDn = validMask[idxN] && validMask[idxS] ? ((relYArr[idxN] - relYArr[idxS]) * normalReliefMult) / dy : 0
+
+      const invLen = 1 / Math.hypot(-dzDx, -dzDn, 1)
+      const nx = -dzDx * invLen
+      const ny = -dzDn * invLen
+      const nz = invLen
+
+      const sunDot = Math.max(0, nx * sunLx + ny * sunLy + nz * sunLz)
+      const fillDot = Math.max(0, nx * fillLx + ny * fillLy + nz * fillLz)
+      const shade = Math.max(0.32, Math.min(1.18, 0.32 + 0.72 * sunDot + 0.14 * fillDot))
+
+      const inCore = inCoreArr[eIdx] === 1
+      const cIdx = coreClampedIdx[eIdx]
+      const relY = relYArr[eIdx]
+      const eastM = eastArr[eIdx]
+      const northM = northArr[eIdx]
+
+      const hRaw = Math.sin(eastM * 0.173 + northM * 0.291) * 43758.5453
+      const grain = (hRaw - Math.floor(hRaw) - 0.5) * 14
+
+      let r: number
+      let g: number
+      let b: number
+
+      if (slope) {
+        if (inCore) {
+          const angle = dem.slopeDegPerVertex[cIdx]
+          const slopeShade = Math.max(0.52, Math.min(1.08, 0.54 + 0.54 * sunDot))
+          if (!Number.isFinite(angle)) {
+            r = 100; g = 116; b = 139
+          } else if (angle < 8) {
+            r = 62; g = 170; b = 137
+          } else if (angle <= 15) {
+            r = 214; g = 176; b = 107
+          } else {
+            r = 214; g = 120; b = 120
+          }
+          r = r * slopeShade + grain * 0.45
+          g = g * slopeShade + grain * 0.45
+          b = b * slopeShade + grain * 0.45
+        } else {
+          r = 54 * shade + grain * 0.4
+          g = 62 * shade + grain * 0.4
+          b = 74 * shade + grain * 0.4
+        }
+      } else {
+        const relNorm = Math.max(0, Math.min(1, (relY - dem.minRelY) / elevSpan))
+        if (relNorm < 0.45) {
+          const t = relNorm / 0.45
+          r = 42 + t * (92 - 42)
+          g = 47 + t * (99 - 47)
+          b = 56 + t * (110 - 56)
+        } else {
+          const t = (relNorm - 0.45) / 0.55
+          r = 92 + t * (162 - 92)
+          g = 99 + t * (168 - 99)
+          b = 110 + t * (178 - 110)
+        }
+        const contourMod = inCore
+          ? (((relY - dem.minRelY) % contourStep) + contourStep) % contourStep < contourStep * 0.075
+            ? 0.85
+            : 1.0
+          : 1.0
+        r = r * shade * contourMod + grain
+        g = g * shade * contourMod + grain
+        b = b * shade * contourMod + grain
+      }
+
+      if (!inCore) {
+        const sr = skirtRadialArr[eIdx]
+        if (sr > 0.35) {
+          const t = (sr - 0.35) / 0.65
+          const fade = 1 - t * t * (3 - 2 * t)
+          r = 5 + (r - 5) * fade
+          g = 5 + (g - 5) * fade
+          b = 7 + (b - 7) * fade
+        }
+      }
+
+      const minCoreChannel = inCore ? 22 : 5
+      colors[eIdx * 4] = Math.max(minCoreChannel, Math.min(242, Math.round(r)))
+      colors[eIdx * 4 + 1] = Math.max(minCoreChannel, Math.min(242, Math.round(g)))
+      colors[eIdx * 4 + 2] = Math.max(inCore ? 26 : 7, Math.min(245, Math.round(b)))
+      colors[eIdx * 4 + 3] = 255
+    }
+  }
+
+  const extIndicesList: number[] = []
+  for (let erow = 0; erow < extH - 1; erow++) {
+    for (let ecol = 0; ecol < extW - 1; ecol++) {
+      const a = erow * extW + ecol
+      const b = a + 1
+      const c = a + extW
+      const d = c + 1
+      if (validMask[a] && validMask[c] && validMask[b]) extIndicesList.push(a, c, b)
+      if (validMask[b] && validMask[c] && validMask[d]) extIndicesList.push(b, c, d)
+    }
+  }
+
+  const geometry = new C.Geometry({
+    attributes: Object.assign(new C.GeometryAttributes(), {
+      position: new C.GeometryAttribute({
+        componentDatatype: C.ComponentDatatype.DOUBLE,
+        componentsPerAttribute: 3,
+        values: extVertices,
+      }),
+      normal: new C.GeometryAttribute({
+        componentDatatype: C.ComponentDatatype.FLOAT,
+        componentsPerAttribute: 3,
+        values: normals,
+      }),
+      color: new C.GeometryAttribute({
+        componentDatatype: C.ComponentDatatype.UNSIGNED_BYTE,
+        componentsPerAttribute: 4,
+        normalize: true,
+        values: colors,
+      }),
+    }),
+    indices: new Uint32Array(extIndicesList),
+    primitiveType: C.PrimitiveType.TRIANGLES,
+    boundingSphere: C.BoundingSphere.fromVertices(extVertices),
+  })
+
+  rt.bounds = C.BoundingSphere.fromVertices(coreVertices) ?? geometry.boundingSphere ?? null
+  rt.patchCentre = position(origin.longitude_deg, origin.latitude_deg, origin.elevation_m)
+  rt.patch = rt.viewer.scene.primitives.add(
+    new C.Primitive({
+      geometryInstances: new C.GeometryInstance({ geometry }),
+      appearance: new C.PerInstanceColorAppearance({ flat: true, translucent: false, closed: false }),
+      asynchronous: false,
+    }),
+  )
+
+  const wire = new C.PolylineCollection()
+  for (let fixed = 0; fixed < width; fixed += 4) {
+    for (const column of [false, true]) {
+      let segment: C.Cartesian3[] = []
+      const flush = () => {
+        if (segment.length > 1) {
+          wire.add({
+            positions: segment,
+            width: 1,
+            material: C.Material.fromType('Color', {
+              color: C.Color.fromCssColorString('#5eead4').withAlpha(0.14),
+            }),
+          })
+        }
+        segment = []
+      }
+      for (let moving = 0; moving < width; moving++) {
+        const crow = column ? moving : fixed
+        const ccol = column ? fixed : moving
+        const cIdx = crow * width + ccol
+        if (!coreValid[cIdx]) {
+          flush()
+          continue
+        }
+        const eIdx = (crow + SKIRT_RINGS) * extW + (ccol + SKIRT_RINGS)
+        segment.push(
+          position(
+            locations[eIdx].lon,
+            locations[eIdx].lat,
+            origin.elevation_m + dem.positions[cIdx * 3 + 1] * scale + 0.8,
+          ),
+        )
+      }
+      flush()
+    }
+  }
+  rt.wire = rt.viewer.scene.primitives.add(wire)
 }
 
 /** Cesium viewer adapter. No procedural global heights or invented local terrain. */
@@ -176,8 +455,9 @@ export function CesiumLunarStage(props: Props) {
   const [ready,setReady]=useState(0),[error,setError]=useState(''),[message,setMessage]=useState('Loading LROC imagery…')
   const focusMatches=!!props.focusCoordinates && Math.abs(props.focusCoordinates.latitude_deg-canonical.coordinates.latitude_deg)<1e-7 && Math.abs(props.focusCoordinates.longitude_deg-canonical.coordinates.longitude_deg)<1e-7
   const verified=focusMatches&&isCanonicalTerrain(props.demTerrain?.metadata,canonical.coordinates)
-  const hasDemPatch=!!props.focusCoordinates&&!!props.demTerrain&&props.demTerrain.metadata.provenance?.data_kind==='cached_real'&&Math.abs(props.focusCoordinates.latitude_deg-props.demTerrain.metadata.coordinates.latitude_deg)<1e-4&&Math.abs(((props.focusCoordinates.longitude_deg-props.demTerrain.metadata.coordinates.longitude_deg+180)%360+360)%360-180)<1e-4
+  const hasDemPatch=!!props.focusCoordinates&&!!props.demTerrain&&props.demTerrain.metadata.provenance?.data_kind==='cached_real'&&sampleDemAtLatLon(props.demTerrain,props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg).insidePatch
   const matching=verified&&observerMatches(props.demTerrain?.metadata,props.analysisCoordinates,props.analysisObserverHeightM,props.observerHeightM,props.analysisDataKind)
+  const effectiveScale=getEffectiveVerticalScale(props.demTerrain,props.verticalScale)
   useEffect(()=>{
     if(!host.current)return
     let rt:Runtime|null=null,picker:C.ScreenSpaceEventHandler|undefined,alive=true,failed=false
@@ -190,7 +470,7 @@ export function CesiumLunarStage(props: Props) {
       viewer.scene.backgroundColor=C.Color.fromCssColorString('#050507')
       const provider=new C.WebMapServiceImageryProvider({url:WMS_URL,layers:'luna_wac_global',parameters:{version:'1.1.1',srs:'IAU2000:30100',format:'image/jpeg',transparent:false},tilingScheme:new C.GeographicTilingScheme({ellipsoid:MOON}),maximumLevel:10,enablePickFeatures:false,credit:'NASA / GSFC / ASU · LROC WAC via Lunaserv'})
       viewer.imageryLayers.addImageryProvider(provider)
-      rt={viewer,provider,patch:null,wire:null,imageMaterial:null,bounds:null,local:false,rays:[],target:null,catalog:[],traverse:[],patchCentre:null}
+      rt={viewer,provider,patch:null,wire:null,bounds:null,local:false,rays:[],target:null,catalog:[],traverse:[],patchCentre:null}
       runtime.current=rt
       latest.current.onNasaImageryStatusChange?.('loading')
       provider.errorEvent.addEventListener(()=>{if(!alive)return;failed=true;setMessage('LROC imagery unavailable. No synthetic image is substituted.');latest.current.onNasaImageryStatusChange?.('offline')})
@@ -288,27 +568,51 @@ export function CesiumLunarStage(props: Props) {
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
     try{
-      if(hasDemPatch&&props.demTerrain)makePatch(rt,props.demTerrain,props.verticalScale,props.overlayMode==='slope')
+      if(hasDemPatch&&props.demTerrain)makePatch(rt,props.demTerrain,effectiveScale,props.overlayMode==='slope')
       else discardPatch(rt)
+      rt.viewer.scene.requestRender()
     }catch(e){setError(e instanceof Error?e.message:'Terrain geometry could not load')}
-  },[ready,props.demTerrain,hasDemPatch,props.verticalScale,props.overlayMode])
+  },[ready,props.demTerrain,hasDemPatch,effectiveScale,props.overlayMode])
 
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
     const local=props.desiredCameraMode==='SURFACE'&&hasDemPatch&&!!rt.patchCentre
     rt.local=local;rt.viewer.scene.globe.show=!local
     if(rt.patch)rt.patch.show=local
-    if(rt.wire)rt.wire.show=local&&props.showWireframe
+    if(rt.wire)rt.wire.show=local
     for(const marker of rt.catalog)marker.show=!local
+    rt.viewer.camera.cancelFlight()
     rt.viewer.camera.lookAtTransform(C.Matrix4.IDENTITY)
     const demOrigin=props.demTerrain?.metadata.coordinates??canonical.coordinates
     if(local&&rt.patchCentre&&rt.bounds){
-      const radius=rt.bounds.radius
+      const coreRadius=rt.bounds.radius
+      const scale=getEffectiveVerticalScale(props.demTerrain,props.verticalScale)
       if(props.surfacePreset==='HORIZON'){
-        const origin=position(demOrigin.longitude_deg,demOrigin.latitude_deg,demOrigin.elevation_m+props.observerHeightM)
-        rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(origin,MOON),new C.HeadingPitchRange(0,C.Math.toRadians(-4),15))
+        const focusLat=props.focusCoordinates?.latitude_deg??demOrigin.latitude_deg
+        const focusLon=props.focusCoordinates?.longitude_deg??demOrigin.longitude_deg
+        const centerElev=props.demTerrain?sampleDemAtLatLon(props.demTerrain,focusLat,focusLon).elevationM:demOrigin.elevation_m
+        const eyeOffset=offsetCoordinate(focusLat,focusLon,-240*Math.sin(C.Math.toRadians(28)),-240*Math.cos(C.Math.toRadians(28)))
+        const backElev=props.demTerrain?sampleDemAtLatLon(props.demTerrain,eyeOffset.lat,eyeOffset.lon).elevationM:centerElev
+        const safeBaseElev=Math.max(centerElev,backElev-28)
+        const horizonOrigin=terrainPosition(focusLat,focusLon,safeBaseElev,demOrigin,scale,props.observerHeightM+22)
+        rt.viewer.camera.flyToBoundingSphere(new C.BoundingSphere(horizonOrigin,60),{
+          offset:new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-12),240),
+          duration:0.9,
+          endTransform:C.Transforms.eastNorthUpToFixedFrame(horizonOrigin,MOON),
+          complete:()=>{if(!rt.viewer.isDestroyed())rt.viewer.scene.requestRender()},
+        })
       }else{
-        rt.viewer.camera.lookAtTransform(C.Transforms.eastNorthUpToFixedFrame(rt.patchCentre,MOON),new C.HeadingPitchRange(0,-.65,radius*3.2))
+        const targetCenter=rt.bounds.center
+        const maxScaled=props.demTerrain?props.demTerrain.maxRelY*scale:0
+        const minScaled=props.demTerrain?props.demTerrain.minRelY*scale:0
+        const midScaled=(maxScaled+minScaled)*0.5
+        const obliqueRange=Math.max(coreRadius*1.12,(maxScaled-midScaled+320)/Math.sin(C.Math.toRadians(27)))
+        rt.viewer.camera.flyToBoundingSphere(new C.BoundingSphere(targetCenter,coreRadius),{
+          offset:new C.HeadingPitchRange(C.Math.toRadians(28),C.Math.toRadians(-27),obliqueRange),
+          duration:1.05,
+          endTransform:C.Transforms.eastNorthUpToFixedFrame(rt.patchCentre,MOON),
+          complete:()=>{if(!rt.viewer.isDestroyed())rt.viewer.scene.requestRender()},
+        })
       }
       props.onCameraModeChange('SURFACE')
     }else{
@@ -317,25 +621,33 @@ export function CesiumLunarStage(props: Props) {
       props.onCameraModeChange('ORBITAL')
     }
     rt.viewer.scene.requestRender()
-  // Camera callback identities can change as App state changes; only actual camera inputs reset the view.
+  // Camera callback identities and verticalScale/overlayMode updates should not re-trigger flight;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[ready,hasDemPatch,props.demTerrain,props.desiredCameraMode,props.surfacePreset,props.cameraPresetNonce,props.focusCoordinates,props.hasSelection,props.verticalScale,props.overlayMode])
+  },[ready,hasDemPatch,props.demTerrain,props.desiredCameraMode,props.surfacePreset,props.cameraPresetNonce,props.focusCoordinates,props.hasSelection])
 
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
-    if(rt.wire)rt.wire.show=rt.local&&props.showWireframe
+    if(rt.wire){
+      rt.wire.show=rt.local
+      const wireAlpha=props.showWireframe?0.72:0.14
+      for(let i=0;i<rt.wire.length;i++){
+        rt.wire.get(i).material.uniforms.color.alpha=wireAlpha
+      }
+    }
     const imagery=props.useNasaTrekImagery!==false
     if(rt.viewer.imageryLayers.length)rt.viewer.imageryLayers.get(0).show=imagery
-    if(rt.patch&&props.overlayMode!=='slope'&&rt.imageMaterial){
-      rt.patch.appearance.material=imagery?rt.imageMaterial:C.Material.fromType('Color',{color:C.Color.fromCssColorString('#344452')})
-    }
     if(rt.target)rt.viewer.entities.remove(rt.target)
     rt.target=null
     if(props.focusCoordinates){
-      const fixed=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
-      const lat=fixed?.latitude_deg??props.focusCoordinates.latitude_deg,lon=fixed?.longitude_deg??props.focusCoordinates.longitude_deg
+      const demOrigin=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
+      const lat=props.focusCoordinates.latitude_deg,lon=props.focusCoordinates.longitude_deg
+      const baseElev=demOrigin?sampleDemAtLatLon(props.demTerrain,lat,lon).elevationM:0
+      const roverDistM=props.activeRoverState
+        ?sphericalDistanceAndBearing(lat,lon,props.activeRoverState.latitudeDeg,props.activeRoverState.longitudeDeg).distanceM
+        :Number.POSITIVE_INFINITY
+      const samePointAsRover=roverDistM<=(rt.local?180:6000)
       rt.target=rt.viewer.entities.add({
-        position:position(lon,lat,fixed?fixed.elevation_m+props.observerHeightM:140),
+        position:terrainPosition(lat,lon,baseElev,demOrigin,rt.local?effectiveScale:1,rt.local?props.observerHeightM:140),
         billboard:{image:BASE_POD_ICON_URI,width:28,height:28,disableDepthTestDistance:Number.POSITIVE_INFINITY},
         label:{
           text:'BASE POD',
@@ -344,7 +656,7 @@ export function CesiumLunarStage(props: Props) {
           outlineColor:C.Color.BLACK,
           outlineWidth:3,
           style:C.LabelStyle.FILL_AND_OUTLINE,
-          pixelOffset:new C.Cartesian2(0,-20),
+          pixelOffset:new C.Cartesian2(0,samePointAsRover?22:-20),
           disableDepthTestDistance:Number.POSITIVE_INFINITY,
         },
       })
@@ -363,14 +675,14 @@ export function CesiumLunarStage(props: Props) {
       }
     }
     rt.viewer.scene.requestRender()
-  },[ready,matching,props.currentSample,props.showWireframe,props.useNasaTrekImagery,props.overlayMode,props.verticalScale,props.focusCoordinates,props.observerHeightM,props.desiredCameraMode,props.demTerrain])
+  },[ready,matching,props.currentSample,props.showWireframe,props.useNasaTrekImagery,props.overlayMode,effectiveScale,props.focusCoordinates,props.observerHeightM,props.desiredCameraMode,props.demTerrain,props.activeRoverState])
 
   useEffect(()=>{
     const rt=runtime.current;if(!rt)return
     for(const entity of rt.traverse)rt.viewer.entities.remove(entity)
     rt.traverse=[]
     const demOrigin=rt.local&&props.demTerrain?props.demTerrain.metadata.coordinates:null
-    const scale=rt.local?props.verticalScale:1
+    const scale=rt.local?effectiveScale:1
     const pathOffset=rt.local?8:120
     const wpOffset=rt.local?10:140
     const tgtOffset=rt.local?18:150
@@ -496,7 +808,7 @@ export function CesiumLunarStage(props: Props) {
       }
     }
     rt.viewer.scene.requestRender()
-  },[ready,props.traverseTarget,props.researchTargets,props.catalogSites,props.traverseWaypoints,props.traverseCandidates,props.activeRoverState,props.demTerrain,props.verticalScale,props.desiredCameraMode,props.focusCoordinates])
+  },[ready,props.traverseTarget,props.researchTargets,props.catalogSites,props.traverseWaypoints,props.traverseCandidates,props.activeRoverState,props.demTerrain,effectiveScale,props.desiredCameraMode,props.focusCoordinates])
 
   return <div className="absolute inset-0" aria-label="Cesium lunar imagery and verified terrain">
     <div ref={host} className="absolute inset-0"/>

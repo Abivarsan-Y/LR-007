@@ -137,7 +137,7 @@ export function App() {
   // DEM / visualization overlays
   const [overlayMode, setOverlayMode] = useState<TerrainOverlayMode>('albedo')
   const [showWireframe, setShowWireframe] = useState(false)
-  const [verticalScale, setVerticalScale] = useState<1 | 2 | 4>(1)
+  const [verticalScale, setVerticalScale] = useState<1 | 2 | 4>(2)
   const [polarOpen, setPolarOpen] = useState(false)
 
   // Floating hideable sidebars + master HUD visibility
@@ -188,14 +188,14 @@ export function App() {
       setShowProvenanceInfo(false)
       setDropdownOpen(false)
       setSearchQuery(site.shortName)
-      setFocusCoords({ latitude_deg: site.latitude_deg, longitude_deg: site.longitude_deg })
-      if (zoomSurface) setDesiredCameraMode('SURFACE')
-      setCameraPresetNonce(n => n + 1)
 
       try {
         const loaded = await loadCatalogSiteWorkspace(site, mast)
         if (sequence !== requestSequence.current) return
         setWorkspace(loaded)
+        setFocusCoords({ latitude_deg: site.latitude_deg, longitude_deg: site.longitude_deg })
+        if (zoomSurface) setDesiredCameraMode('SURFACE')
+        setCameraPresetNonce(n => n + 1)
         setSampleIndex(idx => Math.min(idx, Math.max(loaded.analysis.samples.length - 1, 0)))
       } catch {
         if (sequence === requestSequence.current) setLoadError('Site data could not load. Select the site again to retry.')
@@ -230,7 +230,10 @@ export function App() {
       setCameraPresetNonce(n => n + 1)
 
       const sequence = ++requestSequence.current
-      const existingDem = workspace?.demTerrain ?? null
+      const existingDem =
+        workspace?.demTerrain && sampleDemAtLatLon(workspace.demTerrain, lat, lon).insidePatch
+          ? workspace.demTerrain
+          : null
       setLoadingTarget(false)
       setLoadError('')
       const custom = buildCustomCoordinateWorkspace({
@@ -364,7 +367,11 @@ export function App() {
       setFocusCoords({ latitude_deg: pick.latitude_deg, longitude_deg: pick.longitude_deg })
       setSearchQuery(formatLatLonCompact(pick.latitude_deg, pick.longitude_deg))
       const sequence = ++requestSequence.current
-      const existingDem = workspace?.demTerrain ?? null
+      const existingDem =
+        workspace?.demTerrain &&
+        sampleDemAtLatLon(workspace.demTerrain, pick.latitude_deg, pick.longitude_deg).insidePatch
+          ? workspace.demTerrain
+          : null
       setLoadingTarget(false)
       setLoadError('')
       setWorkspace(
