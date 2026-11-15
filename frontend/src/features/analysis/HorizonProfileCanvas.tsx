@@ -73,7 +73,7 @@ export function HorizonProfileCanvas({
 
       // Y-axis ticks
       ctx.fillStyle = 'rgba(148, 163, 184, 0.6)'
-      ctx.font = '9px "JetBrains Mono", ui-monospace, monospace'
+      ctx.font = '9px "Geist", "Segoe UI", sans-serif'
       ctx.textAlign = 'right'
       ctx.fillText('0°', padLeft - 4, yZero + 3)
       ctx.fillText('12°', padLeft - 4, y15 + 3)

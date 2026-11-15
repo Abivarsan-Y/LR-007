@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #f1f5f9;
+  --ops-font: "Geist", "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+  --ops-ink: #f0f2f5;
+  --ops-muted: #adb4c0;
+  --ops-ice: #d4deeb;
+  --ops-edge: rgb(195 205 220 / .22);
+  font-family: var(--ops-font);
+  color: var(--ops-ink);
   background-color: #050507;
   color-scheme: dark;
   font-synthesis: none;
@@ -22,18 +27,47 @@ body,
   height: 100%;
   overflow: hidden;
   background-color: #050507;
-  color: #f1f5f9;
+  color: var(--ops-ink);
 }
 
 .font-mono-tech {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-family: var(--ops-font);
 }
 
 .glass-hud {
-  background: rgba(10, 11, 15, 0.78);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  background:
+    radial-gradient(ellipse at 13% 0%, rgb(196 204 215 / .15), transparent 55%),
+    radial-gradient(ellipse at 100% 100%, rgb(107 121 144 / .10), transparent 58%),
+    linear-gradient(149deg, rgb(37 40 47 / .74), rgb(10 12 16 / .84) 65%, rgb(23 26 34 / .78));
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+  backdrop-filter: blur(22px) saturate(145%);
+  border: 1px solid var(--ops-edge);
+  box-shadow: inset 0 1px 0 rgb(240 244 250 / .22),
+    inset 0 -1px 0 rgb(154 163 180 / .11), 0 12px 36px rgb(1 2 5 / .5);
+}
+
+.lunar-ui :is(.text-slate-400, .text-slate-500) { color: var(--ops-muted); }
+.lunar-ui .text-slate-600 { color: #929baa; }
+.lunar-ui input::placeholder { color: #a1a9b7; }
+
+.lunar-ui .glass-hud button:is(.rounded-full, .rounded-xl, .rounded-lg, .rounded-md) {
+  background-image: linear-gradient(158deg, rgb(233 238 247 / .09), transparent 73%);
+}
+
+.lunar-ui .glass-hud :is(button, input, select, a, svg[tabindex]):focus-visible {
+  outline: 2px solid var(--ops-ice);
+  outline-offset: 2px;
+}
+
+.lunar-search-glass:focus-within {
+  border-color: rgb(200 211 228 / .55);
+  box-shadow: inset 0 1px rgb(241 245 252 / .23), 0 0 0 3px rgb(179 191 212 / .14),
+    0 12px 36px rgb(1 2 5 / .5);
+}
+
+.lunar-chart-glass {
+  background: linear-gradient(155deg, rgb(25 28 35 / .82), rgb(8 10 15 / .87));
+  border-color: rgb(189 201 221 / .16);
 }
 
 .tabular-nums {
@@ -50,7 +84,7 @@ input[type="range"].hud-range {
 
 input[type="range"].hud-range::-webkit-slider-runnable-track {
   height: 2px;
-  background: rgba(255, 255, 255, 0.16);
+  background: linear-gradient(90deg, #727c8c, #a3aab7);
   border-radius: 999px;
 }
 
@@ -72,7 +106,7 @@ input[type="range"].hud-range:hover::-webkit-slider-thumb {
 
 input[type="range"].hud-range::-moz-range-track {
   height: 2px;
-  background: rgba(255, 255, 255, 0.16);
+  background: linear-gradient(90deg, #727c8c, #a3aab7);
   border-radius: 999px;
 }
 
@@ -97,9 +131,9 @@ input[type="range"].hud-range::-moz-range-thumb {
 }
 
 .polar-map text {
-  fill: #94a3b8;
+  fill: var(--ops-muted);
   font-size: 9px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--ops-font);
 }
 
 .polar-map .footnote {
@@ -128,7 +162,7 @@ input[type="range"].hud-range::-moz-range-thumb {
   background: rgba(255, 255, 255, 0.04);
   color: #cbd5e1;
   font-size: 11px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--ops-font);
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -152,7 +186,7 @@ input[type="range"].hud-range::-moz-range-thumb {
 .polar-map .polar-detail strong {
   display: block;
   font-size: 12px;
-  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-family: var(--ops-font);
   color: #f1f5f9;
   margin-bottom: 4px;
 }
