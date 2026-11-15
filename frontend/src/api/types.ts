@@ -238,11 +238,20 @@ export interface TraverseCoordinates {
 
 export interface TraverseManualCandidate {
   candidate_id: string
+  candidate_type?: 'FORWARD_STEP' | 'REGEN_SPOT'
+  is_regen_spot?: boolean
   coordinates: TraverseCoordinates
   step_bearing_deg: number
   step_distance_m: number
   distance_to_target_m: number
   distance_progress_m: number
+  distance_to_base_m?: number
+  return_to_base_wh?: number
+  distance_to_sunlit_m?: number
+  nearest_sunlit_illum_pct?: number
+  reach_sunlit_wh?: number
+  required_return_wh?: number
+  can_return_to_base?: boolean
   slope_deg: number
   slope_band: SlopeBand
   illumination_fraction: number
@@ -274,6 +283,13 @@ export interface TraverseManualResponse {
     slope_deg: number
     battery_wh: number
     los_to_base: boolean
+    distance_to_base_m?: number
+    return_to_base_wh?: number
+    distance_to_sunlit_m?: number
+    nearest_sunlit_illum_pct?: number
+    reach_sunlit_wh?: number
+    required_return_wh?: number
+    can_return_to_base?: boolean
   }
   target_destination: {
     latitude_deg: number
@@ -292,6 +308,13 @@ export interface TraverseWaypoint {
   coordinates: TraverseCoordinates
   distance_from_start_m: number
   distance_to_target_m: number
+  distance_to_base_m?: number
+  return_to_base_wh?: number
+  distance_to_sunlit_m?: number
+  nearest_sunlit_illum_pct?: number
+  reach_sunlit_wh?: number
+  required_return_wh?: number
+  can_return_to_base?: boolean
   slope_deg: number
   illumination_fraction: number
   battery_wh: number

@@ -1337,8 +1337,53 @@ export function advanceSolarGeometry(
   sunAzimuthDeg: number,
   sunElevationDeg: number,
   metHours: number,
+  samples?: AnalysisSample[],
 ): { sunAz: number; sunEl: number } {
-  const effAz = (((sunAzimuthDeg + metHours * SYNODIC_SOLAR_AZ_RATE_DEG_PER_H) % 360) + 360) % 360
+  if (samples && samples.length >= 2 && metHours >= 0) {
+    const s0 = samples[0]
+    const lastIdx = samples.length - 1
+    const last = samples[lastIdx]
+    const el0 = s0.sun.elevation_deg
+    if (metHours <= s0.met_hours) {
+      return { sunAz: ((sunAzimuthDeg % 360) + 360) % 360, sunEl: sunElevationDeg }
+    }
+    let prevAz = s0.sun.azimuth_deg
+    let cumDAz = 0
+    if (metHours <= last.met_hours) {
+      for (let i = 1; i < samples.length; i++) {
+        const cur = samples[i]
+        const prev = samples[i - 1]
+        const curAz = cur.sun.azimuth_deg
+        const stepDAz = ((((curAz - prevAz + 180) % 360) + 360) % 360) - 180
+        if (metHours <= cur.met_hours) {
+          const span = Math.max(1e-9, cur.met_hours - prev.met_hours)
+          const f = Math.max(0, Math.min(1, (metHours - prev.met_hours) / span))
+          const dAz = cumDAz + f * stepDAz
+          const dEl = (prev.sun.elevation_deg - el0) + f * (cur.sun.elevation_deg - prev.sun.elevation_deg)
+          return {
+            sunAz: (((sunAzimuthDeg + dAz) % 360) + 360) % 360,
+            sunEl: sunElevationDeg + dEl,
+          }
+        }
+        cumDAz += stepDAz
+        prevAz = curAz
+      }
+    } else {
+      for (let i = 1; i < samples.length; i++) {
+        const curAz = samples[i].sun.azimuth_deg
+        cumDAz += ((((curAz - prevAz + 180) % 360) + 360) % 360) - 180
+        prevAz = curAz
+      }
+      const extraH = metHours - last.met_hours
+      const dAz = cumDAz - extraH * SYNODIC_SOLAR_AZ_RATE_DEG_PER_H
+      const dEl = (last.sun.elevation_deg - el0) + 0.35 * Math.sin(extraH * ((2 * Math.PI) / 708.7))
+      return {
+        sunAz: (((sunAzimuthDeg + dAz) % 360) + 360) % 360,
+        sunEl: sunElevationDeg + dEl,
+      }
+    }
+  }
+  const effAz = (((sunAzimuthDeg - metHours * SYNODIC_SOLAR_AZ_RATE_DEG_PER_H) % 360) + 360) % 360
   const effEl = sunElevationDeg + 0.35 * Math.sin(metHours * ((2 * Math.PI) / 708.7))
   return { sunAz: effAz, sunEl: effEl }
 }
@@ -1349,6 +1394,8 @@ export function computeStepKinematicsAndPower(
   illuminationFraction: number,
   currentBatteryWh: number,
   currentMetHours = 0.0,
+  allowStationaryRegen = true,
+  forceRegen = false,
 ): {
   effectiveSpeedMps: number
   driveDurationHours: number
@@ -1374,10 +1421,22 @@ export function computeStepKinematicsAndPower(
   const transitHours = driveHours + navOverheadHours
 
   const solarActive = illuminationFraction >= MIN_REGEN_ILLUMINATION
-  const ecoFactor = !solarActive && distanceM > 600.0 ? 0.52 : 1.0
+  let ecoFactor = 1.0
+  let maneuverWh = 0.0
+  let solarFactor = 0.16
+  if (distanceM <= 600.0) {
+    ecoFactor = 1.0
+    maneuverWh = distanceM > 0 ? 34.0 * ((distanceM / 300.0) ** 0.25) * (1.0 + 0.6 * Math.sin(slopeRad)) : 0.0
+    solarFactor = 0.16
+  } else {
+    ecoFactor = !solarActive ? 0.52 : 1.0
+    maneuverWh = 0.0
+    solarFactor = 0.45
+  }
+
   const pDriveW = ROVER_BASE_DRIVE_POWER_W * (1.0 + 1.5 * Math.sin(slopeRad)) * ecoFactor
-  const driveDrainWh = pDriveW * driveHours + 24.0 * transitHours
-  const solarGainWh = solarActive ? ROVER_PEAK_SOLAR_POWER_W * illuminationFraction * 0.45 * transitHours : 0.0
+  const driveDrainWh = pDriveW * driveHours + 24.0 * transitHours + maneuverWh
+  const solarGainWh = solarActive ? ROVER_PEAK_SOLAR_POWER_W * illuminationFraction * solarFactor * transitHours : 0.0
 
   const rawAfterWh = currentBatteryWh + solarGainWh - driveDrainWh
   const batteryBeforeRegenWh = Math.min(ROVER_BATTERY_CAPACITY_WH, Math.max(0.0, rawAfterWh))
@@ -1386,7 +1445,7 @@ export function computeStepKinematicsAndPower(
   let regenDwellHours = 0.0
   let newBatteryWh = Math.min(ROVER_BATTERY_CAPACITY_WH, batteryBeforeRegenWh)
 
-  if (solarActive && batteryBeforeRegenWh < ROVER_REGEN_TRIGGER_WH) {
+  if (allowStationaryRegen && solarActive && (batteryBeforeRegenWh < ROVER_REGEN_TRIGGER_WH || forceRegen)) {
     const netChargeW = Math.max(45.0, ROVER_PEAK_SOLAR_POWER_W * illuminationFraction - 30.0)
     const targetWh = Math.max(batteryBeforeRegenWh, Math.min(ROVER_BATTERY_CAPACITY_WH, ROVER_REGEN_TARGET_WH))
     regenEnergyWh = Math.max(0.0, targetWh - batteryBeforeRegenWh)
@@ -1413,6 +1472,278 @@ export function computeStepKinematicsAndPower(
   }
 }
 
+interface LocalSunlitSpot {
+  found: boolean
+  distance_m: number
+  bearing_deg: number
+  latitude_deg: number
+  longitude_deg: number
+  elevation_m: number
+  slope_deg: number
+  illumination_fraction: number
+  reach_energy_wh: number
+  los_to_base: boolean
+  arrival_met_hours: number
+}
+
+function findLocalNearestSunlitSpot(
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+  latDeg: number,
+  lonDeg: number,
+  baseLat: number,
+  baseLon: number,
+  sunAz: number,
+  sunEl: number,
+  arrivalMetHours: number,
+  stepDistanceM = 300.0,
+  samples?: AnalysisSample[],
+): LocalSunlitSpot {
+  const hereSample = sampleDemAtLatLon(dem, latDeg, lonDeg)
+  const losHere = checkLocalSurfaceLos(dem, baseLat, baseLon, latDeg, lonDeg)
+  const sNow = advanceSolarGeometry(sunAz, sunEl, arrivalMetHours, samples)
+  const s1h = advanceSolarGeometry(sunAz, sunEl, arrivalMetHours + 1.0, samples)
+  const iNow = estimateLocalSolarIllumination(dem, horizon, latDeg, lonDeg, sNow.sunAz, sNow.sunEl)
+  const i1h = estimateLocalSolarIllumination(dem, horizon, latDeg, lonDeg, s1h.sunAz, s1h.sunEl)
+  const sustHere = Math.min(iNow, i1h)
+
+  if (sustHere >= MIN_REGEN_ILLUMINATION && hereSample.slopeDeg <= ROVER_MAX_SLOPE_DEG && losHere.hasLos) {
+    return {
+      found: true,
+      distance_m: 0.0,
+      bearing_deg: 0.0,
+      latitude_deg: latDeg,
+      longitude_deg: lonDeg,
+      elevation_m: hereSample.elevationM,
+      slope_deg: hereSample.slopeDeg,
+      illumination_fraction: sustHere,
+      reach_energy_wh: 0.0,
+      los_to_base: true,
+      arrival_met_hours: arrivalMetHours,
+    }
+  }
+
+  const { distanceM: distToBase, bearingDeg: azToBase } = sphericalDistanceAndBearing(latDeg, lonDeg, baseLat, baseLon)
+  const rawRadii = [
+    Math.max(160.0, stepDistanceM * 0.45),
+    Math.max(350.0, stepDistanceM * 0.9),
+    Math.max(750.0, stepDistanceM * 1.45),
+    Math.max(1500.0, stepDistanceM * 2.2),
+  ].sort((a, b) => a - b)
+  const radii: number[] = []
+  for (const d of rawRadii) {
+    if (d >= 50.0 && radii.every(prev => Math.abs(d - prev) >= 25.0)) radii.push(d)
+  }
+
+  const bearings = [azToBase, 0, 52.5, 105, 157.5, 210, 262.5, 315]
+  for (const dScan of radii) {
+    let bestRing: LocalSunlitSpot | null = null
+    const approxH = dScan / (ROVER_SPEED_MPS * 3600.0)
+    const scanMet = arrivalMetHours + approxH
+    const s0 = advanceSolarGeometry(sunAz, sunEl, scanMet, samples)
+    const s1 = advanceSolarGeometry(sunAz, sunEl, scanMet + 1.0, samples)
+
+    for (const brg of bearings) {
+      const dest = sphericalDestination(latDeg, lonDeg, brg, dScan)
+      const sSample = sampleDemAtLatLon(dem, dest.lat, dest.lon)
+      if (sSample.slopeDeg > ROVER_MAX_SLOPE_DEG) continue
+      const sLos = checkLocalSurfaceLos(dem, baseLat, baseLon, dest.lat, dest.lon)
+      if (!sLos.hasLos) continue
+
+      const i0 = estimateLocalSolarIllumination(dem, horizon, dest.lat, dest.lon, s0.sunAz, s0.sunEl)
+      const i1 = estimateLocalSolarIllumination(dem, horizon, dest.lat, dest.lon, s1.sunAz, s1.sunEl)
+      const sust = Math.min(i0, i1)
+      if (sust < MIN_REGEN_ILLUMINATION) continue
+
+      const kinReach = computeStepKinematicsAndPower(
+        dScan,
+        sSample.slopeDeg,
+        i0,
+        ROVER_BATTERY_CAPACITY_WH,
+        arrivalMetHours,
+        false,
+        false,
+      )
+      const spot: LocalSunlitSpot = {
+        found: true,
+        distance_m: dScan,
+        bearing_deg: ((brg % 360) + 360) % 360,
+        latitude_deg: dest.lat,
+        longitude_deg: dest.lon,
+        elevation_m: sSample.elevationM,
+        slope_deg: sSample.slopeDeg,
+        illumination_fraction: sust,
+        reach_energy_wh: Math.max(0.0, ROVER_BATTERY_CAPACITY_WH - kinReach.newBatteryWh),
+        los_to_base: true,
+        arrival_met_hours: kinReach.arrivalMetHours,
+      }
+      if (
+        !bestRing ||
+        spot.illumination_fraction > bestRing.illumination_fraction ||
+        (spot.illumination_fraction === bestRing.illumination_fraction && spot.slope_deg < bestRing.slope_deg)
+      ) {
+        bestRing = spot
+      }
+    }
+    if (bestRing) return bestRing
+  }
+
+  const estEscapeD = Math.min(distToBase, Math.max(stepDistanceM * 2.2, 1500.0))
+  const kinEsc = computeStepKinematicsAndPower(
+    estEscapeD,
+    Math.min(ROVER_MAX_SLOPE_DEG, hereSample.slopeDeg),
+    0.0,
+    ROVER_BATTERY_CAPACITY_WH,
+    arrivalMetHours,
+    false,
+    false,
+  )
+  return {
+    found: false,
+    distance_m: estEscapeD,
+    bearing_deg: azToBase,
+    latitude_deg: baseLat,
+    longitude_deg: baseLon,
+    elevation_m: hereSample.elevationM,
+    slope_deg: Math.min(ROVER_MAX_SLOPE_DEG, hereSample.slopeDeg),
+    illumination_fraction: 0.0,
+    reach_energy_wh: Math.max(0.0, ROVER_BATTERY_CAPACITY_WH - kinEsc.newBatteryWh),
+    los_to_base: losHere.hasLos,
+    arrival_met_hours: arrivalMetHours,
+  }
+}
+
+function computeLocalReturnAndSunlitBudget(
+  dem: DecodedDemSiteTerrain | null,
+  horizon: ContractHorizonPoint[],
+  candLat: number,
+  candLon: number,
+  candSlope: number,
+  baseLat: number,
+  baseLon: number,
+  nominalStepDist: number,
+  batteryAfterStepWh: number,
+  arrivalMetHours: number,
+  sunAz: number,
+  sunEl: number,
+  referenceSunlitSpot?: LocalSunlitSpot,
+  candIllum?: number,
+  candLos = true,
+  samples?: AnalysisSample[],
+): {
+  distance_to_base_m: number
+  return_to_base_wh: number
+  distance_to_sunlit_m: number
+  nearest_sunlit_illum_pct: number
+  reach_sunlit_wh: number
+  required_return_wh: number
+  can_return_to_base: boolean
+  sunlit_spot: LocalSunlitSpot
+} {
+  const { distanceM: distanceToBaseM } = sphericalDistanceAndBearing(candLat, candLon, baseLat, baseLon)
+
+  let distToSunlitM = 0.0
+  let nearestSunlitIllum = 0.0
+  let reachSunlitWh = 0.0
+  let sunlitSpot: LocalSunlitSpot
+
+  if (candIllum !== undefined && candIllum >= MIN_REGEN_ILLUMINATION && candSlope <= ROVER_MAX_SLOPE_DEG && candLos) {
+    distToSunlitM = 0.0
+    nearestSunlitIllum = candIllum
+    reachSunlitWh = 0.0
+    sunlitSpot = {
+      found: true,
+      distance_m: 0.0,
+      bearing_deg: 0.0,
+      latitude_deg: candLat,
+      longitude_deg: candLon,
+      elevation_m: 0.0,
+      slope_deg: candSlope,
+      illumination_fraction: nearestSunlitIllum,
+      reach_energy_wh: 0.0,
+      los_to_base: true,
+      arrival_met_hours: arrivalMetHours,
+    }
+  } else if (referenceSunlitSpot?.found) {
+    const dSun = sphericalDistanceAndBearing(
+      candLat,
+      candLon,
+      referenceSunlitSpot.latitude_deg,
+      referenceSunlitSpot.longitude_deg,
+    ).distanceM
+    const dReach = Math.min(dSun, Math.max(nominalStepDist * 2.5, 600.0))
+    const reachKin = computeStepKinematicsAndPower(
+      dReach,
+      Math.min(ROVER_MAX_SLOPE_DEG, candSlope),
+      candIllum ?? 0.0,
+      ROVER_BATTERY_CAPACITY_WH,
+      arrivalMetHours,
+      false,
+      false,
+    )
+    distToSunlitM = dSun
+    nearestSunlitIllum = referenceSunlitSpot.illumination_fraction
+    reachSunlitWh = Math.max(0.0, ROVER_BATTERY_CAPACITY_WH - reachKin.newBatteryWh)
+    sunlitSpot = referenceSunlitSpot
+  } else if (referenceSunlitSpot) {
+    distToSunlitM = referenceSunlitSpot.distance_m
+    nearestSunlitIllum = referenceSunlitSpot.illumination_fraction
+    reachSunlitWh = referenceSunlitSpot.reach_energy_wh
+    sunlitSpot = referenceSunlitSpot
+  } else {
+    sunlitSpot = findLocalNearestSunlitSpot(
+      dem,
+      horizon,
+      candLat,
+      candLon,
+      baseLat,
+      baseLon,
+      sunAz,
+      sunEl,
+      arrivalMetHours,
+      nominalStepDist,
+      samples,
+    )
+    distToSunlitM = sunlitSpot.distance_m
+    nearestSunlitIllum = sunlitSpot.illumination_fraction
+    reachSunlitWh = sunlitSpot.reach_energy_wh
+  }
+
+  const effectiveReturnDistM = Math.min(distanceToBaseM, Math.max(500.0, nominalStepDist * 3.0))
+  let returnToBaseWh = 0.0
+  if (effectiveReturnDistM > 5.0) {
+    const stepUnit = Math.min(distanceToBaseM, Math.max(nominalStepDist, 150.0))
+    const numReturnSteps = effectiveReturnDistM / Math.max(nominalStepDist, 150.0)
+    const singleStepKin = computeStepKinematicsAndPower(
+      stepUnit,
+      Math.min(ROVER_MAX_SLOPE_DEG, candSlope * 0.8),
+      nominalStepDist > 600.0 ? Math.max(candIllum ?? 0.0, 0.35) : 0.0,
+      ROVER_BATTERY_CAPACITY_WH,
+      arrivalMetHours,
+      false,
+      false,
+    )
+    const trackFactor = nominalStepDist > 600.0 ? 0.65 : 1.12
+    returnToBaseWh =
+      numReturnSteps * Math.max(0.0, ROVER_BATTERY_CAPACITY_WH - singleStepKin.newBatteryWh) * trackFactor
+  }
+
+  const minReserveWh = ROVER_BATTERY_CAPACITY_WH * (ROVER_MIN_RESERVE_PCT / 100.0)
+  const requiredReturnWh = minReserveWh + Math.max(returnToBaseWh, reachSunlitWh * 1.15)
+  const canReturnToBase = batteryAfterStepWh >= requiredReturnWh
+
+  return {
+    distance_to_base_m: Number(distanceToBaseM.toFixed(1)),
+    return_to_base_wh: Number(returnToBaseWh.toFixed(1)),
+    distance_to_sunlit_m: Number(distToSunlitM.toFixed(1)),
+    nearest_sunlit_illum_pct: Number((nearestSunlitIllum * 100.0).toFixed(1)),
+    reach_sunlit_wh: Number(reachSunlitWh.toFixed(1)),
+    required_return_wh: Number(requiredReturnWh.toFixed(1)),
+    can_return_to_base: canReturnToBase,
+    sunlit_spot: sunlitSpot,
+  }
+}
+
 function evaluateLocalStepCandidate(
   params: {
     candLat: number
@@ -1430,6 +1761,8 @@ function evaluateLocalStepCandidate(
     sunEl: number
     candidateId: string
     currentMetHours?: number
+    referenceSunlitSpot?: LocalSunlitSpot
+    samples?: AnalysisSample[]
   },
   dem: DecodedDemSiteTerrain | null,
   horizon: ContractHorizonPoint[],
@@ -1450,18 +1783,50 @@ function evaluateLocalStepCandidate(
     sunEl,
     candidateId,
     currentMetHours = 0.0,
+    referenceSunlitSpot,
+    samples,
   } = params
   const candSample = sampleDemAtLatLon(dem, candLat, candLon)
   const { distanceM: distToTarget } = sphericalDistanceAndBearing(candLat, candLon, targetLat, targetLon)
   const progressM = currentDistToTarget - distToTarget
   const approxTransitH = candStepDist / (ROVER_SPEED_MPS * 3600.0)
-  const effSun = advanceSolarGeometry(sunAz, sunEl, currentMetHours + approxTransitH)
+  const effSun = advanceSolarGeometry(sunAz, sunEl, currentMetHours + approxTransitH, samples)
   const illum = estimateLocalSolarIllumination(dem, horizon, candLat, candLon, effSun.sunAz, effSun.sunEl)
-  const kin = computeStepKinematicsAndPower(candStepDist, candSample.slopeDeg, illum, currentBat, currentMetHours)
+  const kin = computeStepKinematicsAndPower(
+    candStepDist,
+    candSample.slopeDeg,
+    illum,
+    currentBat,
+    currentMetHours,
+    false,
+    false,
+  )
   const los = checkLocalSurfaceLos(dem, baseLat, baseLon, candLat, candLon)
+  const budget = computeLocalReturnAndSunlitBudget(
+    dem,
+    horizon,
+    candLat,
+    candLon,
+    candSample.slopeDeg,
+    baseLat,
+    baseLon,
+    nominalStepDist,
+    kin.newBatteryWh,
+    kin.arrivalMetHours,
+    sunAz,
+    sunEl,
+    referenceSunlitSpot,
+    illum,
+    los.hasLos,
+    samples,
+  )
 
   let isValid = true
   const rejectionReasons: string[] = []
+  if (progressM <= 0.0) {
+    isValid = false
+    rejectionReasons.push('No forward progress toward research target')
+  }
   if (candSample.slopeDeg > ROVER_MAX_SLOPE_DEG) {
     isValid = false
     rejectionReasons.push(`Excessive slope (${candSample.slopeDeg.toFixed(1)}° > 15° limit)`)
@@ -1469,6 +1834,12 @@ function evaluateLocalStepCandidate(
   if (kin.reservePct < ROVER_MIN_RESERVE_PCT) {
     isValid = false
     rejectionReasons.push(`Low battery reserve (${kin.reservePct.toFixed(1)}% < 20%)`)
+  }
+  if (!budget.can_return_to_base) {
+    isValid = false
+    rejectionReasons.push(
+      `Insufficient battery to return to Base Pod / sunlit area (${Math.round(kin.newBatteryWh)}Wh < ${Math.round(budget.required_return_wh)}Wh required — use Regen Spot)`,
+    )
   }
   if (!los.hasLos) {
     isValid = false
@@ -1489,6 +1860,8 @@ function evaluateLocalStepCandidate(
 
   return {
     candidate_id: candidateId,
+    candidate_type: 'FORWARD_STEP',
+    is_regen_spot: false,
     coordinates: {
       latitude_deg: Number(candLat.toFixed(6)),
       longitude_deg: Number(candLon.toFixed(6)),
@@ -1498,6 +1871,13 @@ function evaluateLocalStepCandidate(
     step_distance_m: Number(candStepDist.toFixed(1)),
     distance_to_target_m: Number(distToTarget.toFixed(1)),
     distance_progress_m: Number(progressM.toFixed(1)),
+    distance_to_base_m: budget.distance_to_base_m,
+    return_to_base_wh: budget.return_to_base_wh,
+    distance_to_sunlit_m: budget.distance_to_sunlit_m,
+    nearest_sunlit_illum_pct: budget.nearest_sunlit_illum_pct,
+    reach_sunlit_wh: budget.reach_sunlit_wh,
+    required_return_wh: budget.required_return_wh,
+    can_return_to_base: budget.can_return_to_base,
     slope_deg: Number(candSample.slopeDeg.toFixed(1)),
     slope_band: classifySlopeBand(candSample.slopeDeg),
     illumination_fraction: Number(illum.toFixed(3)),
@@ -1538,6 +1918,7 @@ function computeLocalTraverseManual(
   },
   dem: DecodedDemSiteTerrain | null,
   horizon: ContractHorizonPoint[],
+  samples?: AnalysisSample[],
 ): TraverseManualResponse {
   const currentLat = params.current_latitude_deg
   const currentLon = params.current_longitude_deg
@@ -1560,6 +1941,21 @@ function computeLocalTraverseManual(
   )
   const curSample = sampleDemAtLatLon(dem, currentLat, currentLon)
   const curLos = checkLocalSurfaceLos(dem, baseLat, baseLon, currentLat, currentLon)
+  const curSun = advanceSolarGeometry(sunAz, sunEl, currentMet, samples)
+  const curIllum = estimateLocalSolarIllumination(dem, horizon, currentLat, currentLon, curSun.sunAz, curSun.sunEl)
+  const originSunlitSpot = findLocalNearestSunlitSpot(
+    dem,
+    horizon,
+    currentLat,
+    currentLon,
+    baseLat,
+    baseLon,
+    sunAz,
+    sunEl,
+    currentMet,
+    stepDist,
+    samples,
+  )
 
   const candidates: TraverseManualCandidate[] = []
   const arcSpan = 130.0
@@ -1597,6 +1993,8 @@ function computeLocalTraverseManual(
           sunEl,
           candidateId: `cand_${i + 1}`,
           currentMetHours: currentMet,
+          referenceSunlitSpot: originSunlitSpot,
+          samples,
         },
         dem,
         horizon,
@@ -1631,6 +2029,8 @@ function computeLocalTraverseManual(
         sunEl,
         candidateId: 'cand_target',
         currentMetHours: currentMet,
+        referenceSunlitSpot: originSunlitSpot,
+        samples,
       },
       dem,
       horizon,
@@ -1667,23 +2067,187 @@ function computeLocalTraverseManual(
   }
 
   if (candidates.length > 0 && !candidates.some(c => c.is_valid)) {
-    const forward = candidates.filter(c => c.distance_progress_m > 0)
-    const pool = forward.length > 0 ? forward : candidates
-    const bestSwitchback = pool.reduce((best, cur) => {
-      if (best.los_to_base !== cur.los_to_base) return cur.los_to_base ? cur : best
-      return cur.slope_deg < best.slope_deg ? cur : best
-    }, pool[0])
-    bestSwitchback.slope_deg = Number(Math.min(14.5, bestSwitchback.slope_deg * 0.65).toFixed(1))
-    bestSwitchback.slope_band = 'CAUTION'
-    bestSwitchback.los_to_base = true
-    bestSwitchback.is_valid = true
-    bestSwitchback.rejection_reasons = []
+    const slopeOnly = candidates.filter(
+      c => Boolean(c.can_return_to_base) && c.battery_reserve_pct >= ROVER_MIN_RESERVE_PCT,
+    )
+    if (slopeOnly.length > 0) {
+      const forward = slopeOnly.filter(c => c.distance_progress_m > 0)
+      const pool = forward.length > 0 ? forward : slopeOnly
+      const bestSwitchback = pool.reduce((best, cur) => {
+        if (best.los_to_base !== cur.los_to_base) return cur.los_to_base ? cur : best
+        return cur.slope_deg < best.slope_deg ? cur : best
+      }, pool[0])
+      bestSwitchback.slope_deg = Number(Math.min(14.5, bestSwitchback.slope_deg * 0.65).toFixed(1))
+      bestSwitchback.slope_band = 'CAUTION'
+      bestSwitchback.los_to_base = true
+      bestSwitchback.is_valid = true
+      bestSwitchback.rejection_reasons = []
+    }
+  }
+
+  const validForward = candidates.filter(c => c.is_valid)
+  const topForward = validForward.length
+    ? validForward.reduce((best, cur) => (cur.score > best.score ? cur : best), validForward[0])
+    : null
+  const needRegenSpot =
+    currentBat < ROVER_REGEN_TRIGGER_WH ||
+    candidates.some(c => c.can_return_to_base === false) ||
+    (topForward !== null &&
+      topForward.illumination_fraction < MIN_REGEN_ILLUMINATION &&
+      currentBat < ROVER_REGEN_TARGET_WH - 30.0)
+
+  if (needRegenSpot) {
+    let spotInfo = originSunlitSpot
+    if (!spotInfo.found && curIllum >= MIN_REGEN_ILLUMINATION && curSample.slopeDeg <= ROVER_MAX_SLOPE_DEG && curLos.hasLos) {
+      spotInfo = {
+        found: true,
+        distance_m: 0.0,
+        bearing_deg: 0.0,
+        latitude_deg: currentLat,
+        longitude_deg: currentLon,
+        elevation_m: curSample.elevationM,
+        slope_deg: curSample.slopeDeg,
+        illumination_fraction: curIllum,
+        reach_energy_wh: 0.0,
+        los_to_base: true,
+        arrival_met_hours: currentMet,
+      }
+    }
+
+    if (spotInfo.found && spotInfo.illumination_fraction >= MIN_REGEN_ILLUMINATION) {
+      const kinReg = computeStepKinematicsAndPower(
+        spotInfo.distance_m,
+        spotInfo.slope_deg,
+        spotInfo.illumination_fraction,
+        currentBat,
+        currentMet,
+        true,
+        true,
+      )
+      const minReserveWh = ROVER_BATTERY_CAPACITY_WH * (ROVER_MIN_RESERVE_PCT / 100.0)
+      if (kinReg.regenEnergyWh > 0.0 && kinReg.batteryBeforeRegenWh >= minReserveWh) {
+        const rDistToTarget = sphericalDistanceAndBearing(
+          spotInfo.latitude_deg,
+          spotInfo.longitude_deg,
+          targetLat,
+          targetLon,
+        ).distanceM
+        const rProgress = currentDistToTarget - rDistToTarget
+        const rLos = checkLocalSurfaceLos(dem, baseLat, baseLon, spotInfo.latitude_deg, spotInfo.longitude_deg)
+        const rBudget = computeLocalReturnAndSunlitBudget(
+          dem,
+          horizon,
+          spotInfo.latitude_deg,
+          spotInfo.longitude_deg,
+          spotInfo.slope_deg,
+          baseLat,
+          baseLon,
+          stepDist,
+          kinReg.newBatteryWh,
+          kinReg.departureMetHours,
+          sunAz,
+          sunEl,
+          originSunlitSpot,
+          spotInfo.illumination_fraction,
+          rLos.hasLos,
+          samples,
+        )
+        const depSun = advanceSolarGeometry(sunAz, sunEl, kinReg.departureMetHours, samples)
+        const allForwardBlocked = validForward.length === 0
+        const enteringShadowLow =
+          topForward !== null &&
+          topForward.illumination_fraction < MIN_REGEN_ILLUMINATION &&
+          currentBat < 960.0
+        const topScore = candidates.length ? Math.max(...candidates.map(c => c.score)) + 180.0 : 900.0
+        const regenScore =
+          allForwardBlocked || (enteringShadowLow && spotInfo.distance_m < 5.0)
+            ? topScore
+            : (validForward.length ? Math.min(...validForward.map(c => c.score)) : 400.0) - 10.0
+        const regenValid = rLos.hasLos && rBudget.can_return_to_base
+        const regenCand: TraverseManualCandidate = {
+          candidate_id: 'cand_regen_spot',
+          candidate_type: 'REGEN_SPOT',
+          is_regen_spot: true,
+          coordinates: {
+            latitude_deg: Number(spotInfo.latitude_deg.toFixed(6)),
+            longitude_deg: Number(spotInfo.longitude_deg.toFixed(6)),
+            elevation_m: Number(spotInfo.elevation_m.toFixed(1)),
+          },
+          step_bearing_deg: Number(spotInfo.bearing_deg.toFixed(1)),
+          step_distance_m: Number(spotInfo.distance_m.toFixed(1)),
+          distance_to_target_m: Number(rDistToTarget.toFixed(1)),
+          distance_progress_m: Number(rProgress.toFixed(1)),
+          distance_to_base_m: rBudget.distance_to_base_m,
+          return_to_base_wh: rBudget.return_to_base_wh,
+          distance_to_sunlit_m: rBudget.distance_to_sunlit_m,
+          nearest_sunlit_illum_pct: rBudget.nearest_sunlit_illum_pct,
+          reach_sunlit_wh: rBudget.reach_sunlit_wh,
+          required_return_wh: rBudget.required_return_wh,
+          can_return_to_base: rBudget.can_return_to_base,
+          slope_deg: Number(spotInfo.slope_deg.toFixed(1)),
+          slope_band: classifySlopeBand(spotInfo.slope_deg),
+          illumination_fraction: Number(spotInfo.illumination_fraction.toFixed(3)),
+          battery_wh: kinReg.newBatteryWh,
+          battery_before_regen_wh: kinReg.batteryBeforeRegenWh,
+          battery_reserve_pct: kinReg.reservePct,
+          battery_delta_wh: kinReg.deltaWh,
+          effective_speed_mps: kinReg.effectiveSpeedMps,
+          drive_duration_hours: kinReg.driveDurationHours,
+          regen_dwell_hours: kinReg.regenDwellHours,
+          regen_energy_wh: kinReg.regenEnergyWh,
+          arrival_met_hours: kinReg.arrivalMetHours,
+          met_hours: kinReg.departureMetHours,
+          sun_azimuth_deg: Number(depSun.sunAz.toFixed(1)),
+          sun_elevation_deg: Number(depSun.sunEl.toFixed(2)),
+          los_to_base: rLos.hasLos,
+          los_clearance_m: Number(rLos.minClearanceM.toFixed(1)),
+          is_valid: regenValid,
+          rejection_reasons: regenValid ? [] : ['Insufficient sunlit dwell safety margin'],
+          score: Number(regenScore.toFixed(1)),
+        }
+        if (candidates.length >= numCands) {
+          let worstIdx = 0
+          for (let i = 1; i < candidates.length; i++) {
+            const cur = candidates[i]
+            const worst = candidates[worstIdx]
+            if (
+              Number(cur.is_valid) < Number(worst.is_valid) ||
+              (cur.is_valid === worst.is_valid && cur.score < worst.score)
+            ) {
+              worstIdx = i
+            }
+          }
+          candidates[worstIdx] = regenCand
+        } else {
+          candidates.push(regenCand)
+        }
+      }
+    }
   }
 
   candidates.sort((a, b) => {
     if (a.is_valid !== b.is_valid) return a.is_valid ? -1 : 1
     return b.score - a.score
   })
+
+  const curBudget = computeLocalReturnAndSunlitBudget(
+    dem,
+    horizon,
+    currentLat,
+    currentLon,
+    curSample.slopeDeg,
+    baseLat,
+    baseLon,
+    stepDist,
+    currentBat,
+    currentMet,
+    sunAz,
+    sunEl,
+    originSunlitSpot,
+    curIllum,
+    curLos.hasLos,
+    samples,
+  )
 
   return {
     mode: 'manual',
@@ -1694,6 +2258,13 @@ function computeLocalTraverseManual(
       slope_deg: Number(curSample.slopeDeg.toFixed(1)),
       battery_wh: Number(currentBat.toFixed(1)),
       los_to_base: curLos.hasLos,
+      distance_to_base_m: curBudget.distance_to_base_m,
+      return_to_base_wh: curBudget.return_to_base_wh,
+      distance_to_sunlit_m: curBudget.distance_to_sunlit_m,
+      nearest_sunlit_illum_pct: curBudget.nearest_sunlit_illum_pct,
+      reach_sunlit_wh: curBudget.reach_sunlit_wh,
+      required_return_wh: curBudget.required_return_wh,
+      can_return_to_base: curBudget.can_return_to_base,
     },
     target_destination: {
       latitude_deg: Number(targetLat.toFixed(6)),
@@ -1725,6 +2296,7 @@ export async function requestTraverseManual(
   },
   dem: DecodedDemSiteTerrain | null,
   horizon: ContractHorizonPoint[],
+  samples?: AnalysisSample[],
 ): Promise<TraverseManualResponse> {
   const apiRes = await fetchJsonOrNull<TraverseManualResponse>('/api/traverse/manual', {
     method: 'POST',
@@ -1732,7 +2304,7 @@ export async function requestTraverseManual(
     body: JSON.stringify(params),
   })
   if (apiRes) return apiRes
-  return computeLocalTraverseManual(params, dem, horizon)
+  return computeLocalTraverseManual(params, dem, horizon, samples)
 }
 
 export async function requestTraverseAutomatic(
@@ -1752,6 +2324,7 @@ export async function requestTraverseAutomatic(
   },
   dem: DecodedDemSiteTerrain | null,
   horizon: ContractHorizonPoint[],
+  samples?: AnalysisSample[],
 ): Promise<TraverseAutomaticResponse> {
   const apiRes = await fetchJsonOrNull<TraverseAutomaticResponse>('/api/traverse/automatic', {
     method: 'POST',
@@ -1768,6 +2341,7 @@ export async function requestTraverseAutomatic(
   const baseLon = params.base_longitude_deg ?? startLon
   const stepM = params.step_m ?? 250.0
   const maxSteps = params.max_steps ?? 40
+  const effectiveMaxSteps = Math.max(maxSteps, 55)
   const sunAz = params.sun_azimuth_deg ?? 180.0
   const sunEl = params.sun_elevation_deg ?? 1.0
   const startMet = params.start_met_hours ?? 0.0
@@ -1780,9 +2354,27 @@ export async function requestTraverseAutomatic(
   let status: 'OPTIMAL' | 'FEASIBLE' | 'BLOCKED' = 'OPTIMAL'
 
   const startSample = sampleDemAtLatLon(dem, startLat, startLon)
-  const startSun = advanceSolarGeometry(sunAz, sunEl, currMet)
+  const startSun = advanceSolarGeometry(sunAz, sunEl, currMet, samples)
   const startIllum = estimateLocalSolarIllumination(dem, horizon, startLat, startLon, startSun.sunAz, startSun.sunEl)
   const initDist = sphericalDistanceAndBearing(startLat, startLon, targetLat, targetLon).distanceM
+  const startBudget = computeLocalReturnAndSunlitBudget(
+    dem,
+    horizon,
+    startLat,
+    startLon,
+    startSample.slopeDeg,
+    baseLat,
+    baseLon,
+    stepM,
+    currBat,
+    currMet,
+    sunAz,
+    sunEl,
+    undefined,
+    startIllum,
+    true,
+    samples,
+  )
 
   const waypoints: TraverseWaypoint[] = [
     {
@@ -1794,6 +2386,13 @@ export async function requestTraverseAutomatic(
       },
       distance_from_start_m: 0,
       distance_to_target_m: Number(initDist.toFixed(1)),
+      distance_to_base_m: startBudget.distance_to_base_m,
+      return_to_base_wh: startBudget.return_to_base_wh,
+      distance_to_sunlit_m: startBudget.distance_to_sunlit_m,
+      nearest_sunlit_illum_pct: startBudget.nearest_sunlit_illum_pct,
+      reach_sunlit_wh: startBudget.reach_sunlit_wh,
+      required_return_wh: startBudget.required_return_wh,
+      can_return_to_base: startBudget.can_return_to_base,
       slope_deg: Number(startSample.slopeDeg.toFixed(1)),
       illumination_fraction: Number(startIllum.toFixed(3)),
       battery_wh: Number(currBat.toFixed(1)),
@@ -1825,7 +2424,7 @@ export async function requestTraverseAutomatic(
     lastWp.battery_reserve_pct = Number(((ROVER_REGEN_TARGET_WH / ROVER_BATTERY_CAPACITY_WH) * 100.0).toFixed(1))
     currMet = Number((currMet + dwellH).toFixed(3))
     lastWp.met_hours = currMet
-    const effTop = advanceSolarGeometry(sunAz, sunEl, currMet)
+    const effTop = advanceSolarGeometry(sunAz, sunEl, currMet, samples)
     lastWp.sun_azimuth_deg = Number(effTop.sunAz.toFixed(1))
     lastWp.sun_elevation_deg = Number(effTop.sunEl.toFixed(2))
     if (lastWp.waypoint_index > 0 && lastWp.action !== 'ARRIVE_RESEARCH_TARGET') {
@@ -1834,12 +2433,14 @@ export async function requestTraverseAutomatic(
     currBat = ROVER_REGEN_TARGET_WH
   }
 
-  for (let step = 1; step <= maxSteps; step++) {
+  let completed = false
+  for (let iter = 1; iter <= effectiveMaxSteps; iter++) {
+    const wpIdx = waypoints.length
     const distRem = sphericalDistanceAndBearing(currLat, currLon, targetLat, targetLon).distanceM
-    if (distRem <= stepM * 1.1) {
+    if (distRem <= stepM * 1.35) {
       const targetSample = sampleDemAtLatLon(dem, targetLat, targetLon)
       const approxTransitH = distRem / (ROVER_SPEED_MPS * 3600.0)
-      let effSun = advanceSolarGeometry(sunAz, sunEl, currMet + approxTransitH)
+      let effSun = advanceSolarGeometry(sunAz, sunEl, currMet + approxTransitH, samples)
       let targetIllum = estimateLocalSolarIllumination(
         dem,
         horizon,
@@ -1850,12 +2451,13 @@ export async function requestTraverseAutomatic(
       )
       const prevWp = waypoints[waypoints.length - 1]
       if (
-        targetIllum < MIN_REGEN_ILLUMINATION &&
+        prevWp.waypoint_index > 0 &&
         prevWp.illumination_fraction >= MIN_REGEN_ILLUMINATION &&
-        currBat < ROVER_REGEN_TARGET_WH - 0.1
+        currBat < ROVER_REGEN_TARGET_WH - 0.1 &&
+        (targetIllum < MIN_REGEN_ILLUMINATION || currBat < ROVER_REGEN_TRIGGER_WH)
       ) {
         topUpLastSunlitWaypoint()
-        effSun = advanceSolarGeometry(sunAz, sunEl, currMet + approxTransitH)
+        effSun = advanceSolarGeometry(sunAz, sunEl, currMet + approxTransitH, samples)
         targetIllum = estimateLocalSolarIllumination(
           dem,
           horizon,
@@ -1871,13 +2473,33 @@ export async function requestTraverseAutomatic(
         targetIllum,
         currBat,
         currMet,
+        false,
+        false,
       )
       const finalLos = checkLocalSurfaceLos(dem, baseLat, baseLon, targetLat, targetLon)
+      const finalBudget = computeLocalReturnAndSunlitBudget(
+        dem,
+        horizon,
+        targetLat,
+        targetLon,
+        targetSample.slopeDeg,
+        baseLat,
+        baseLon,
+        stepM,
+        finalKin.newBatteryWh,
+        finalKin.arrivalMetHours,
+        sunAz,
+        sunEl,
+        undefined,
+        targetIllum,
+        finalLos.hasLos,
+        samples,
+      )
       totalDist += distRem
       currMet = finalKin.departureMetHours
       currBat = finalKin.newBatteryWh
       waypoints.push({
-        waypoint_index: step,
+        waypoint_index: wpIdx,
         coordinates: {
           latitude_deg: Number(targetLat.toFixed(6)),
           longitude_deg: Number(targetLon.toFixed(6)),
@@ -1885,6 +2507,13 @@ export async function requestTraverseAutomatic(
         },
         distance_from_start_m: Number(totalDist.toFixed(1)),
         distance_to_target_m: 0,
+        distance_to_base_m: finalBudget.distance_to_base_m,
+        return_to_base_wh: finalBudget.return_to_base_wh,
+        distance_to_sunlit_m: finalBudget.distance_to_sunlit_m,
+        nearest_sunlit_illum_pct: finalBudget.nearest_sunlit_illum_pct,
+        reach_sunlit_wh: finalBudget.reach_sunlit_wh,
+        required_return_wh: finalBudget.required_return_wh,
+        can_return_to_base: finalBudget.can_return_to_base,
         slope_deg: Number(targetSample.slopeDeg.toFixed(1)),
         illumination_fraction: Number(targetIllum.toFixed(3)),
         battery_wh: finalKin.newBatteryWh,
@@ -1901,6 +2530,7 @@ export async function requestTraverseAutomatic(
         los_to_base: Boolean(finalLos.hasLos || prevWp.los_to_base),
         action: 'ARRIVE_RESEARCH_TARGET',
       })
+      completed = true
       break
     }
 
@@ -1921,6 +2551,7 @@ export async function requestTraverseAutomatic(
       },
       dem,
       horizon,
+      samples,
     )
 
     let validCands = stepRes.candidates.filter(c => c.is_valid)
@@ -1947,23 +2578,65 @@ export async function requestTraverseAutomatic(
         },
         dem,
         horizon,
+        samples,
       )
       validCands = stepRes.candidates.filter(c => c.is_valid)
     }
 
     if (!validCands.length) {
-      status = step > 2 ? 'FEASIBLE' : 'BLOCKED'
+      status = waypoints.length > 2 ? 'FEASIBLE' : 'BLOCKED'
+      completed = true
       break
     }
 
     let best = validCands[0]
+
+    // Merge stationary in-place Solar Regen Spot into waypoints[waypoints.length - 1]
+    if (best.is_regen_spot && best.step_distance_m < 5.0) {
+      if (waypoints[waypoints.length - 1].waypoint_index > 0) {
+        if (waypoints[waypoints.length - 1].action === 'SOLAR_REGEN_HOLD') {
+          const nonRegen = validCands.filter(c => !c.is_regen_spot)
+          if (nonRegen.length) {
+            best = nonRegen[0]
+          } else {
+            status = waypoints.length > 2 ? 'FEASIBLE' : 'BLOCKED'
+            completed = true
+            break
+          }
+        } else {
+          const lastWp = waypoints[waypoints.length - 1]
+          lastWp.regen_energy_wh = Number(((lastWp.regen_energy_wh ?? 0) + (best.regen_energy_wh ?? 0)).toFixed(1))
+          lastWp.regen_dwell_hours = Number(((lastWp.regen_dwell_hours ?? 0) + (best.regen_dwell_hours ?? 0)).toFixed(3))
+          lastWp.battery_wh = best.battery_wh
+          lastWp.battery_reserve_pct = best.battery_reserve_pct
+          lastWp.met_hours = best.met_hours
+          lastWp.sun_azimuth_deg = best.sun_azimuth_deg
+          lastWp.sun_elevation_deg = best.sun_elevation_deg
+          lastWp.action = 'SOLAR_REGEN_HOLD'
+          currBat = best.battery_wh
+          currMet = best.met_hours ?? currMet
+          continue
+        }
+      } else {
+        const nonRegen = validCands.filter(c => !c.is_regen_spot)
+        if (nonRegen.length) {
+          best = nonRegen[0]
+        } else {
+          topUpLastSunlitWaypoint()
+          continue
+        }
+      }
+    }
+
     if (
+      !best.is_regen_spot &&
       best.illumination_fraction < MIN_REGEN_ILLUMINATION &&
+      waypoints[waypoints.length - 1].waypoint_index > 0 &&
       waypoints[waypoints.length - 1].illumination_fraction >= MIN_REGEN_ILLUMINATION &&
       currBat < ROVER_REGEN_TARGET_WH - 0.1
     ) {
       topUpLastSunlitWaypoint()
-      const effC = advanceSolarGeometry(sunAz, sunEl, currMet + (best.drive_duration_hours ?? 0))
+      const effC = advanceSolarGeometry(sunAz, sunEl, currMet + (best.drive_duration_hours ?? 0), samples)
       const cIllum = estimateLocalSolarIllumination(
         dem,
         horizon,
@@ -1978,6 +2651,8 @@ export async function requestTraverseAutomatic(
         cIllum,
         currBat,
         currMet,
+        false,
+        false,
       )
       best = {
         ...best,
@@ -2007,13 +2682,20 @@ export async function requestTraverseAutomatic(
       ? 'ARRIVE_RESEARCH_TARGET'
       : (best.regen_dwell_hours ?? 0) > 0 && best.illumination_fraction >= MIN_REGEN_ILLUMINATION
         ? 'SOLAR_REGEN_HOLD'
-        : `STEP_${step}`
+        : `STEP_${wpIdx}`
 
     waypoints.push({
-      waypoint_index: step,
+      waypoint_index: wpIdx,
       coordinates: best.coordinates,
       distance_from_start_m: Number(totalDist.toFixed(1)),
       distance_to_target_m: arrived ? 0 : best.distance_to_target_m,
+      distance_to_base_m: best.distance_to_base_m,
+      return_to_base_wh: best.return_to_base_wh,
+      distance_to_sunlit_m: best.distance_to_sunlit_m,
+      nearest_sunlit_illum_pct: best.nearest_sunlit_illum_pct,
+      reach_sunlit_wh: best.reach_sunlit_wh,
+      required_return_wh: best.required_return_wh,
+      can_return_to_base: best.can_return_to_base,
       slope_deg: best.slope_deg,
       illumination_fraction: best.illumination_fraction,
       battery_wh: best.battery_wh,
@@ -2031,11 +2713,13 @@ export async function requestTraverseAutomatic(
       action,
     })
 
-    if (arrived) break
-
-    if (step === maxSteps) {
-      status = 'FEASIBLE'
+    if (arrived) {
+      completed = true
+      break
     }
+  }
+  if (!completed) {
+    status = 'FEASIBLE'
   }
 
   const maxSlope = Math.max(...waypoints.map(w => w.slope_deg))
@@ -2075,6 +2759,7 @@ export function interpolateRoverPositionAtTime(
   metHours: number,
   initialSunAzDeg = 180.0,
   initialSunElDeg = 1.0,
+  samples?: AnalysisSample[],
 ): RoverPlaybackState | null {
   if (!waypoints.length) return null
 
@@ -2093,7 +2778,7 @@ export function interpolateRoverPositionAtTime(
     const sun =
       wp.sun_azimuth_deg !== undefined && wp.sun_elevation_deg !== undefined
         ? { sunAz: wp.sun_azimuth_deg, sunEl: wp.sun_elevation_deg }
-        : advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, arrivalMet)
+        : advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, arrivalMet, samples)
     return {
       wp,
       arrivalMet,
@@ -2133,7 +2818,7 @@ export function interpolateRoverPositionAtTime(
       const f = Math.max(0, Math.min(1, (clampedMet - prev.departMet) / span))
       const endBat = next.wp.battery_before_regen_wh ?? next.wp.battery_wh
       const bat = prev.wp.battery_wh + (endBat - prev.wp.battery_wh) * f
-      const sun = advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, clampedMet)
+      const sun = advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, clampedMet, samples)
       return {
         metHours: clampedMet,
         latitudeDeg:
@@ -2164,7 +2849,7 @@ export function interpolateRoverPositionAtTime(
       const f = Math.max(0, Math.min(1, (clampedMet - next.arrivalMet) / span))
       const startBat = next.wp.battery_before_regen_wh ?? next.wp.battery_wh
       const bat = startBat + (next.wp.battery_wh - startBat) * f
-      const sun = advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, clampedMet)
+      const sun = advanceSolarGeometry(initialSunAzDeg, initialSunElDeg, clampedMet, samples)
       return {
         metHours: clampedMet,
         latitudeDeg: next.wp.coordinates.latitude_deg,

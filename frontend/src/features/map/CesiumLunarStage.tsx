@@ -468,18 +468,30 @@ export function CesiumLunarStage(props: Props) {
           ?terrainPosition(props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg,sampleDemAtLatLon(props.demTerrain,props.focusCoordinates.latitude_deg,props.focusCoordinates.longitude_deg).elevationM,demOrigin,scale,pathOffset)
           :null
       for(const cand of candidates){
-        const colorCss=!cand.is_valid?'#ef4444':cand.slope_band==='SAFE'?'#10b981':'#f59e0b'
+        const colorCss=!cand.is_valid?'#ef4444':cand.is_regen_spot?'#facc15':cand.slope_band==='SAFE'?'#10b981':'#f59e0b'
         const candPos=terrainPosition(cand.coordinates.latitude_deg,cand.coordinates.longitude_deg,cand.coordinates.elevation_m,demOrigin,scale,tgtOffset-6)
         if(originPos&&cand.is_valid){
           rt.traverse.push(rt.viewer.entities.add({
             id:`traverse-cand-ray:${cand.candidate_id}`,
-            polyline:{positions:[originPos,candPos],width:1.5,material:C.Color.fromCssColorString(colorCss).withAlpha(0.55)},
+            polyline:{positions:[originPos,candPos],width:cand.is_regen_spot?2.5:1.5,material:C.Color.fromCssColorString(colorCss).withAlpha(cand.is_regen_spot?0.85:0.55)},
           }))
         }
         rt.traverse.push(rt.viewer.entities.add({
           id:`traverse-cand:${cand.candidate_id}`,
           position:candPos,
-          point:{pixelSize:10,color:C.Color.fromCssColorString(colorCss),outlineColor:C.Color.BLACK,outlineWidth:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+          point:{pixelSize:cand.is_regen_spot?13:10,color:C.Color.fromCssColorString(colorCss),outlineColor:C.Color.BLACK,outlineWidth:cand.is_regen_spot?2:1.5,disableDepthTestDistance:Number.POSITIVE_INFINITY},
+          ...(cand.is_regen_spot?{
+            label:{
+              text:'⚡ REGEN SPOT',
+              font:'600 9px "JetBrains Mono", monospace',
+              fillColor:C.Color.fromCssColorString('#fef08a'),
+              outlineColor:C.Color.BLACK,
+              outlineWidth:3,
+              style:C.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset:new C.Cartesian2(0,-16),
+              disableDepthTestDistance:Number.POSITIVE_INFINITY,
+            },
+          }:{}),
         }))
       }
     }

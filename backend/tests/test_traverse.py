@@ -403,5 +403,100 @@ def test_no_solar_regeneration_in_zero_sunlight_and_full_base_los(real_dem_reade
                 assert wp["action"] != "SOLAR_REGEN_HOLD", f"{name} set SOLAR_REGEN_HOLD in shadow"
 
 
+def test_return_budget_and_regen_spot_protection(real_dem_reader):
+    # At ~700m+ from Base Pod with low battery (460 Wh), forward moves cannot safely return to Base Pod
+    res = suggest_next_waypoints(
+        reader=real_dem_reader,
+        current_lat=-89.44,
+        current_lon=-137.50,
+        base_lat=-89.463158,
+        base_lon=-137.501985,
+        target_lat=-89.40,
+        target_lon=-137.50,
+        current_battery_wh=460.0,
+        step_distance_m=400.0,
+        num_candidates=6,
+    )
+    cur = res["current_position"]
+    for key in (
+        "distance_to_base_m",
+        "return_to_base_wh",
+        "distance_to_sunlit_m",
+        "nearest_sunlit_illum_pct",
+        "reach_sunlit_wh",
+        "required_return_wh",
+        "can_return_to_base",
+    ):
+        assert key in cur
+    assert cur["distance_to_base_m"] > 600.0
+    assert cur["can_return_to_base"] is True
+
+    cands = res["candidates"]
+    assert len(cands) == 6
+    assert cands[0]["candidate_id"] == "cand_regen_spot"
+    assert cands[0]["is_regen_spot"] is True
+    assert cands[0]["candidate_type"] == "REGEN_SPOT"
+    assert cands[0]["is_valid"] is True
+    assert cands[0]["regen_energy_wh"] > 0.0
+
+    forward = [c for c in cands if not c.get("is_regen_spot")]
+    assert len(forward) == 5
+    for cand in forward:
+        assert cand["can_return_to_base"] is False
+        assert cand["is_valid"] is False
+        assert any("return to Base Pod" in reason for reason in cand["rejection_reasons"])
+
+
+def test_dataset_solar_geometry_and_time_varying_illumination(real_dem_reader):
+    import json
+    from pathlib import Path
+    from backend.terrain.traverse import advance_solar_geometry, estimate_solar_illumination
+
+    fixture_path = Path("backend/tests/fixtures/science/site01/analysis_nominal.json")
+    samples = json.loads(fixture_path.read_text(encoding="utf-8"))["samples"]
+    s0 = samples[0]
+    s20 = samples[20]
+    az20, el20 = advance_solar_geometry(
+        s0["sun"]["azimuth_deg"], s0["sun"]["elevation_deg"], s20["met_hours"]
+    )
+    assert abs(az20 - s20["sun"]["azimuth_deg"]) < 1e-4
+    assert abs(el20 - s20["sun"]["elevation_deg"]) < 1e-4
+
+    # Sunlit/shadowed terrain transitions dynamically as MET advances
+    az0, el0 = advance_solar_geometry(s0["sun"]["azimuth_deg"], s0["sun"]["elevation_deg"], 0.0)
+    az120, el120 = advance_solar_geometry(s0["sun"]["azimuth_deg"], s0["sun"]["elevation_deg"], 120.0)
+    illum_rim_0 = estimate_solar_illumination(real_dem_reader, -89.90, 0.0, az0, el0)
+    illum_rim_120 = estimate_solar_illumination(real_dem_reader, -89.90, 0.0, az120, el120)
+    assert illum_rim_0 > 0.5 and illum_rim_120 < 0.1
+
+    illum_slope_0 = estimate_solar_illumination(real_dem_reader, -89.55, -137.50, az0, el0)
+    illum_slope_120 = estimate_solar_illumination(real_dem_reader, -89.55, -137.50, az120, el120)
+    assert illum_slope_0 < 0.1 and illum_slope_120 > 0.5
+
+
+def test_local_automatic_traverse_executes_regen_hold_and_arrives(real_dem_reader):
+    plan = plan_automatic_traverse(
+        reader=real_dem_reader,
+        start_lat=-89.463158,
+        start_lon=-137.501985,
+        target_lat=-89.40,
+        target_lon=-137.50,
+        initial_battery_wh=520.0,
+        step_m=400.0,
+        max_steps=15,
+    )
+    assert plan["status"] == "OPTIMAL"
+    wps = plan["waypoints"]
+    assert wps[-1]["action"] == "ARRIVE_RESEARCH_TARGET"
+    assert wps[-1]["distance_to_target_m"] == 0.0
+    assert any(wp["action"] == "SOLAR_REGEN_HOLD" and wp["regen_energy_wh"] > 0.0 for wp in wps)
+    for wp in wps:
+        for key in ("distance_to_base_m", "return_to_base_wh", "distance_to_sunlit_m", "required_return_wh", "can_return_to_base"):
+            assert key in wp
+    for idx in range(1, len(wps)):
+        assert wps[idx]["arrival_met_hours"] > wps[idx - 1]["met_hours"]
+
+
+
 
 

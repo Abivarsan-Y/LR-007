@@ -47,6 +47,7 @@ import type {
   LoadedSiteWorkspace,
   TraverseAutomaticResponse,
   TraverseManualCandidate,
+  TraverseManualResponse,
   TraverseResearchTargetOption,
   TraverseWaypoint,
 } from './api/types'
@@ -164,6 +165,7 @@ export function App() {
   const [traverseStepDistanceM, setTraverseStepDistanceM] = useState(250)
   const [traverseWaypoints, setTraverseWaypoints] = useState<TraverseWaypoint[]>([])
   const [traverseCandidates, setTraverseCandidates] = useState<TraverseManualCandidate[]>([])
+  const [traverseManualPos, setTraverseManualPos] = useState<TraverseManualResponse['current_position'] | null>(null)
   const [traverseAutoResult, setTraverseAutoResult] = useState<TraverseAutomaticResponse | null>(null)
   const [traverseLoading, setTraverseLoading] = useState(false)
   const [roverSimHours, setRoverSimHours] = useState(0)
@@ -445,8 +447,8 @@ export function App() {
 
   const activeRoverState = useMemo(() => {
     if (!traverseOpen || !traverseWaypoints.length) return null
-    return interpolateRoverPositionAtTime(traverseWaypoints, roverSimHours, landingSunAz, landingSunEl)
-  }, [traverseOpen, traverseWaypoints, roverSimHours, landingSunAz, landingSunEl])
+    return interpolateRoverPositionAtTime(traverseWaypoints, roverSimHours, landingSunAz, landingSunEl, samples)
+  }, [traverseOpen, traverseWaypoints, roverSimHours, landingSunAz, landingSunEl, samples])
 
   useEffect(() => {
     if (!playing || samples.length === 0) return
@@ -651,6 +653,7 @@ export function App() {
       setTraverseTarget(null)
       setTraverseWaypoints([])
       setTraverseCandidates([])
+      setTraverseManualPos(null)
       setTraverseAutoResult(null)
       setPickingTraverseTarget(false)
       setTraverseStepDistanceM(250)
@@ -662,6 +665,7 @@ export function App() {
     setPickingTraverseTarget(false)
     setTraverseAutoResult(null)
     setTraverseCandidates([])
+    setTraverseManualPos(null)
     setTraverseStepDistanceM(250)
     setRoverSimHours(0)
     setIsRoverPlaying(false)
@@ -703,9 +707,11 @@ export function App() {
       },
       workspace.demTerrain,
       workspace.analysis.horizon,
+      workspace.analysis.samples,
     )
       .then(res => {
         if (seq !== traverseRequestSeq.current) return
+        setTraverseManualPos(res.current_position)
         setTraverseCandidates(res.candidates)
       })
       .finally(() => {
@@ -735,6 +741,7 @@ export function App() {
     const effectiveStepM = Math.max(traverseStepDistanceM, Math.min(20000, Math.ceil(distToTargetM / 25)))
     setTraverseLoading(true)
     setTraverseCandidates([])
+    setTraverseManualPos(null)
     setIsRoverPlaying(false)
     setRoverSimHours(0)
     setSampleIndex(0)
@@ -755,6 +762,7 @@ export function App() {
       },
       workspace.demTerrain,
       workspace.analysis.horizon,
+      workspace.analysis.samples,
     )
       .then(res => {
         if (seq !== traverseRequestSeq.current) return
@@ -782,9 +790,31 @@ export function App() {
       if (!cand.is_valid || traverseMode !== 'manual') return
       const prevMet = latestWaypoint?.met_hours ?? 0
       const nextMet = cand.met_hours ?? (prevMet + (cand.drive_duration_hours ?? 0.25))
-      const hasRegen = (cand.regen_dwell_hours ?? 0) > 0
+      const hasRegen = (cand.regen_dwell_hours ?? 0) > 0 && cand.illumination_fraction >= 0.15
+      const isInPlaceRegen = Boolean(cand.is_regen_spot) && cand.step_distance_m < 5.0
       setTraverseWaypoints(prev => {
         const last = prev[prev.length - 1]
+        if (isInPlaceRegen && last && prev.length > 1) {
+          const updated: TraverseWaypoint = {
+            ...last,
+            distance_to_base_m: cand.distance_to_base_m ?? last.distance_to_base_m,
+            return_to_base_wh: cand.return_to_base_wh ?? last.return_to_base_wh,
+            distance_to_sunlit_m: cand.distance_to_sunlit_m ?? last.distance_to_sunlit_m,
+            nearest_sunlit_illum_pct: cand.nearest_sunlit_illum_pct ?? last.nearest_sunlit_illum_pct,
+            reach_sunlit_wh: cand.reach_sunlit_wh ?? last.reach_sunlit_wh,
+            required_return_wh: cand.required_return_wh ?? last.required_return_wh,
+            can_return_to_base: cand.can_return_to_base ?? last.can_return_to_base,
+            battery_wh: cand.battery_wh,
+            battery_reserve_pct: cand.battery_reserve_pct,
+            regen_dwell_hours: Number(((last.regen_dwell_hours ?? 0) + (cand.regen_dwell_hours ?? 0)).toFixed(3)),
+            regen_energy_wh: Number(((last.regen_energy_wh ?? 0) + (cand.regen_energy_wh ?? 0)).toFixed(1)),
+            met_hours: nextMet,
+            sun_azimuth_deg: cand.sun_azimuth_deg ?? last.sun_azimuth_deg,
+            sun_elevation_deg: cand.sun_elevation_deg ?? last.sun_elevation_deg,
+            action: 'SOLAR_REGEN_HOLD',
+          }
+          return [...prev.slice(0, -1), updated]
+        }
         const prevDist = last?.distance_from_start_m ?? 0
         const nextIdx = prev.length
         const arrived = cand.distance_to_target_m <= 5.0
@@ -795,6 +825,13 @@ export function App() {
             coordinates: cand.coordinates,
             distance_from_start_m: Number((prevDist + cand.step_distance_m).toFixed(1)),
             distance_to_target_m: arrived ? 0 : cand.distance_to_target_m,
+            distance_to_base_m: cand.distance_to_base_m,
+            return_to_base_wh: cand.return_to_base_wh,
+            distance_to_sunlit_m: cand.distance_to_sunlit_m,
+            nearest_sunlit_illum_pct: cand.nearest_sunlit_illum_pct,
+            reach_sunlit_wh: cand.reach_sunlit_wh,
+            required_return_wh: cand.required_return_wh,
+            can_return_to_base: cand.can_return_to_base,
             slope_deg: cand.slope_deg,
             illumination_fraction: cand.illumination_fraction,
             battery_wh: cand.battery_wh,
@@ -839,7 +876,7 @@ export function App() {
       latestWaypoint.battery_wh,
       prevMet,
     )
-    const sunAfter = advanceSolarGeometry(landingSunAz, landingSunEl, kin.arrivalMetHours)
+    const sunAfter = advanceSolarGeometry(landingSunAz, landingSunEl, kin.arrivalMetHours, samples)
     setTraverseWaypoints(prev => [
       ...prev,
       {
@@ -897,6 +934,7 @@ export function App() {
     setRoverSimHours(0)
     setSampleIndex(0)
     setTraverseAutoResult(null)
+    setTraverseManualPos(null)
     setTraverseWaypoints([makeBasePodWaypoint(workspace, traverseTarget, illum)])
     if (traverseMode === 'automatic') {
       runAutomaticTraversePlan()
@@ -909,6 +947,7 @@ export function App() {
       setPickingTraverseTarget(false)
       setTraverseAutoResult(null)
       setTraverseCandidates([])
+      setTraverseManualPos(null)
       setIsRoverPlaying(false)
       setRoverSimHours(0)
       if (workspace) {
@@ -1818,58 +1857,108 @@ export function App() {
                     const liveMet = activeRoverState
                       ? activeRoverState.metHours
                       : (latestWaypoint.met_hours ?? 0)
+                    const budgetSource = (traverseMode === 'manual' ? traverseManualPos : null) ?? latestWaypoint
+                    const fallbackBaseDist = workspace
+                      ? sphericalDistanceAndBearing(
+                          latestWaypoint.coordinates.latitude_deg,
+                          latestWaypoint.coordinates.longitude_deg,
+                          workspace.target.latitude_deg,
+                          workspace.target.longitude_deg,
+                        ).distanceM
+                      : 0
+                    const distToBase = budgetSource.distance_to_base_m ?? fallbackBaseDist
+                    const returnBaseWh = budgetSource.return_to_base_wh ?? 0
+                    const requiredRetWh = budgetSource.required_return_wh ?? 240
+                    const canReturn = budgetSource.can_return_to_base ?? liveBatWh >= requiredRetWh
+                    const distSunlit = budgetSource.distance_to_sunlit_m ?? (liveIllum >= 0.15 ? 0 : null)
+                    const sunlitPct = budgetSource.nearest_sunlit_illum_pct ?? Math.round(liveIllum * 100)
+                    const reachSunWh = budgetSource.reach_sunlit_wh ?? 0
+                    const fmtD = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`)
                     return (
-                      <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] p-2">
-                        <div>
-                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">
-                            {activeRoverState?.isRegenerating ? '⚡ Charging' : 'Battery'}
-                          </div>
-                          <div
-                            className={`text-[10px] font-mono-tech tabular-nums mt-0.5 ${
-                              liveBatPct >= 50
-                                ? 'text-emerald-300'
-                                : liveBatPct >= 20
-                                  ? 'text-amber-300'
-                                  : 'text-rose-400'
-                            }`}
-                          >
-                            {Math.round(liveBatWh)} Wh ({Math.round(liveBatPct)}%)
-                          </div>
-                          <div className="w-full h-1 rounded-full bg-white/10 mt-1 overflow-hidden">
+                      <div className="space-y-1.5">
+                        <div className="grid grid-cols-3 gap-1.5 rounded-lg bg-white/[0.03] border border-white/[0.06] p-2">
+                          <div>
+                            <div className="text-[8px] font-mono-tech text-slate-500 uppercase">
+                              {activeRoverState?.isRegenerating ? '⚡ Charging' : 'Battery'}
+                            </div>
                             <div
-                              className={`h-full ${
+                              className={`text-[10px] font-mono-tech tabular-nums mt-0.5 ${
                                 liveBatPct >= 50
-                                  ? 'bg-emerald-400'
+                                  ? 'text-emerald-300'
                                   : liveBatPct >= 20
-                                    ? 'bg-amber-400'
-                                    : 'bg-rose-500'
+                                    ? 'text-amber-300'
+                                    : 'text-rose-400'
                               }`}
-                              style={{ width: `${Math.min(100, Math.max(0, liveBatPct))}%` }}
-                            />
+                            >
+                              {Math.round(liveBatWh)} Wh ({Math.round(liveBatPct)}%)
+                            </div>
+                            <div className="w-full h-1 rounded-full bg-white/10 mt-1 overflow-hidden">
+                              <div
+                                className={`h-full ${
+                                  liveBatPct >= 50
+                                    ? 'bg-emerald-400'
+                                    : liveBatPct >= 20
+                                      ? 'bg-amber-400'
+                                      : 'bg-rose-500'
+                                }`}
+                                style={{ width: `${Math.min(100, Math.max(0, liveBatPct))}%` }}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Rover Solar</div>
+                            <div className="text-[10px] font-mono-tech text-amber-300 tabular-nums mt-0.5">
+                              {Math.round(liveIllum * 100)}% Sun
+                            </div>
+                            <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
+                              {activeRoverState?.isRegenerating
+                                ? '+Solar Hold'
+                                : `+${Math.round(350 * liveIllum * 0.42)}W mov`}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Base Pod LoS</div>
+                            <div
+                              className={`text-[10px] font-mono-tech uppercase mt-0.5 ${
+                                liveLos ? 'text-emerald-400' : 'text-rose-400'
+                              }`}
+                            >
+                              {liveLos ? 'LINK UP' : 'BLOCKED'}
+                            </div>
+                            <div className="text-[8px] font-mono-tech text-cyan-300 tabular-nums">
+                              T+{liveMet.toFixed(2)}h · #{latestWaypoint.waypoint_index}
+                            </div>
                           </div>
                         </div>
-                        <div>
-                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Rover Solar</div>
-                          <div className="text-[10px] font-mono-tech text-amber-300 tabular-nums mt-0.5">
-                            {Math.round(liveIllum * 100)}% Sun
+
+                        {/* Base Return & Nearest Sunlit Area Strip */}
+                        <div className="grid grid-cols-2 gap-1.5 rounded-lg bg-white/[0.02] border border-white/[0.06] px-2 py-1.5 text-[8px] font-mono-tech tabular-nums">
+                          <div>
+                            <div className="flex items-center justify-between gap-1">
+                              <span className="text-slate-500 uppercase">Base Return</span>
+                              <span
+                                className={`px-1 py-0.2 rounded text-[7px] uppercase ${
+                                  canReturn
+                                    ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-400/30'
+                                    : 'bg-rose-500/15 text-rose-300 border border-rose-400/35'
+                                }`}
+                              >
+                                {canReturn ? 'RETURN SAFE' : 'REGEN NEEDED'}
+                              </span>
+                            </div>
+                            <div className="text-slate-200 mt-0.5">
+                              {fmtD(distToBase)} · ~{Math.round(returnBaseWh)}Wh (Req {Math.round(requiredRetWh)}Wh)
+                            </div>
                           </div>
-                          <div className="text-[8px] font-mono-tech text-slate-400 tabular-nums">
-                            {activeRoverState?.isRegenerating
-                              ? '+Solar Hold'
-                              : `+${Math.round(350 * liveIllum * 0.42)}W mov`}
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[8px] font-mono-tech text-slate-500 uppercase">Base Pod LoS</div>
-                          <div
-                            className={`text-[10px] font-mono-tech uppercase mt-0.5 ${
-                              liveLos ? 'text-emerald-400' : 'text-rose-400'
-                            }`}
-                          >
-                            {liveLos ? 'LINK UP' : 'BLOCKED'}
-                          </div>
-                          <div className="text-[8px] font-mono-tech text-cyan-300 tabular-nums">
-                            T+{liveMet.toFixed(2)}h · #{latestWaypoint.waypoint_index}
+                          <div className="text-right">
+                            <div className="text-slate-500 uppercase">Nearest Sunlit</div>
+                            <div className="text-amber-300 mt-0.5">
+                              {distSunlit !== null && distSunlit <= 5
+                                ? `SUNLIT HERE (0m · ${Math.round(sunlitPct)}%)`
+                                : distSunlit !== null
+                                  ? `${fmtD(distSunlit)} · ${Math.round(sunlitPct)}%☀ (${Math.round(reachSunWh)}Wh)`
+                                  : 'SCANNING…'}
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -2013,12 +2102,14 @@ export function App() {
                           {traverseCandidates.length > 0 ? (
                             <div className="space-y-1 max-h-[195px] overflow-y-auto hud-scroll pr-0.5">
                               {traverseCandidates.map(cand => {
-                                const bandCls =
-                                  !cand.is_valid
-                                    ? 'border-rose-500/35 bg-rose-500/5 text-rose-300 opacity-75'
+                                const bandCls = !cand.is_valid
+                                  ? 'border-rose-500/35 bg-rose-500/5 text-rose-300 opacity-75'
+                                  : cand.is_regen_spot
+                                    ? 'border-amber-400/65 bg-amber-400/15 hover:bg-amber-400/25 hover:border-amber-300'
                                     : cand.slope_band === 'SAFE'
                                       ? 'border-emerald-400/25 bg-white/[0.03] hover:bg-emerald-400/10 hover:border-emerald-400/50'
                                       : 'border-amber-400/30 bg-white/[0.03] hover:bg-amber-400/10'
+                                const fmtDist = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(1)}km` : `${Math.round(m)}m`)
                                 return (
                                   <button
                                     key={cand.candidate_id}
@@ -2027,19 +2118,24 @@ export function App() {
                                     onClick={() => handleSelectManualCandidate(cand)}
                                     className={`w-full text-left rounded-lg p-2 border transition ${bandCls}`}
                                   >
+                                    {cand.is_regen_spot && (
+                                      <div className="flex items-center justify-between text-[8px] font-mono-tech uppercase tracking-wider text-amber-300 font-semibold mb-1">
+                                        <span>⚡ SOLAR REGEN SPOT</span>
+                                        <span className="text-amber-200">
+                                          +{Math.round(cand.regen_energy_wh ?? 0)}Wh Recharge
+                                        </span>
+                                      </div>
+                                    )}
                                     <div className="flex items-center justify-between gap-1 text-[9px] font-mono-tech">
                                       <span className="text-slate-100 tabular-nums">
-                                        {cand.step_distance_m >= 1000
-                                          ? `${(cand.step_distance_m / 1000).toFixed(1)}km`
-                                          : `${Math.round(cand.step_distance_m)}m`}{' '}
-                                        @ {Math.round(cand.step_bearing_deg)}°
+                                        {cand.is_regen_spot && cand.step_distance_m < 5.0
+                                          ? 'HOLD @ CURRENT SUNLIT SPOT'
+                                          : `${fmtDist(cand.step_distance_m)} @ ${Math.round(cand.step_bearing_deg)}°`}
                                       </span>
                                       <span className="text-pink-300 tabular-nums">
                                         {cand.distance_to_target_m <= 5.0
                                           ? 'DIRECT TOUCHDOWN'
-                                          : cand.distance_to_target_m >= 1000
-                                            ? `${(cand.distance_to_target_m / 1000).toFixed(1)}km to target`
-                                            : `${Math.round(cand.distance_to_target_m)}m to target`}
+                                          : `${fmtDist(cand.distance_to_target_m)} to target`}
                                       </span>
                                     </div>
                                     <div className="flex items-center justify-between text-[8px] font-mono-tech mt-1 tabular-nums text-slate-400">
@@ -2065,6 +2161,16 @@ export function App() {
                                         {cand.los_to_base ? 'LOS OK' : 'NO LOS'}
                                       </span>
                                     </div>
+                                    {cand.distance_to_base_m !== undefined && (
+                                      <div className="flex items-center justify-between text-[7px] font-mono-tech mt-0.5 tabular-nums text-slate-400">
+                                        <span className={cand.can_return_to_base === false ? 'text-rose-300' : 'text-slate-300'}>
+                                          Base: {fmtDist(cand.distance_to_base_m)} (Need {Math.round(cand.required_return_wh ?? 240)}Wh)
+                                        </span>
+                                        <span className="text-amber-200/90">
+                                          Sunlit: {cand.distance_to_sunlit_m !== undefined ? fmtDist(cand.distance_to_sunlit_m) : '0m'}
+                                        </span>
+                                      </div>
+                                    )}
                                     <div className="flex items-center justify-between text-[7px] font-mono-tech mt-0.5 tabular-nums text-slate-400">
                                       <span className="text-cyan-300">
                                         +{(cand.drive_duration_hours ?? 0).toFixed(2)}h drive
